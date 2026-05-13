@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 PROJECT = str(Path(__file__).resolve().parent.parent)
-SERVER_CMD = ["uv", "run", "python", "-m", "src.server", "--skip-index"]
+SERVER_CMD = ["uv", "run", "python", "-m", "code_context.server", "--skip-index"]
 
 # 5 queries with expected files (top-3 should contain these)
 QUERIES = [

@@ -64,4 +64,4 @@
 - [x] 8.3 Call `get_metrics_report()` — shows real vs estimated savings
 - [x] 8.4 Tree-sitter analyzers integrated, fallback to regex preserved
 - [x] 8.5 Bump SERVER_VERSION → 0.4.0
-- [ ] 8.6 Commit all changes
+- [x] 8.6 Commit all changes

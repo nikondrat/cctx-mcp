@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-SERVER_CMD = ["uv", "run", "python", "-m", "src.server", "--skip-index"]
+SERVER_CMD = ["uv", "run", "python", "-m", "code_context.server", "--skip-index"]
 PROJECT = str(Path(__file__).resolve().parent.parent)
 
 
