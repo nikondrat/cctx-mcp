@@ -30,9 +30,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nikondrat/code-context"
-Repository = "https://github.com/nikondrat/code-context"
-Issues = "https://github.com/nikondrat/code-context/issues"
+Homepage = "https://github.com/nikondrat/mcp-code-context"
+Repository = "https://github.com/nikondrat/mcp-code-context"
+Issues = "https://github.com/nikondrat/mcp-code-context/issues"
 
 [project.scripts]
 mcp-code-context = "code_context.server:main"

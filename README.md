@@ -14,8 +14,8 @@
 <p align="center">
   <a href="https://pypi.org/project/mcp-code-context/"><img src="https://img.shields.io/pypi/v/mcp-code-context?style=flat-square&logo=pypi&logoColor=white&label=PyPI&labelColor=1E293B&color=3B82F6" alt="PyPI"></a>
   <a href="https://pypi.org/project/mcp-code-context/"><img src="https://img.shields.io/pypi/pyversions/mcp-code-context?style=flat-square&logo=python&logoColor=white&label=Python&labelColor=1E293B&color=3B82F6" alt="Python"></a>
-  <a href="https://github.com/nikondrat/code-context"><img src="https://img.shields.io/github/stars/nikondrat/code-context?style=flat-square&logo=github&logoColor=white&label=Stars&labelColor=1E293B&color=3B82F6" alt="Stars"></a>
-  <a href="https://github.com/nikondrat/code-context/actions"><img src="https://img.shields.io/github/actions/workflow/status/nikondrat/code-context/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI&labelColor=1E293B&color=3B82F6" alt="CI"></a>
+  <a href="https://github.com/nikondrat/mcp-code-context"><img src="https://img.shields.io/github/stars/nikondrat/mcp-code-context?style=flat-square&logo=github&logoColor=white&label=Stars&labelColor=1E293B&color=3B82F6" alt="Stars"></a>
+  <a href="https://github.com/nikondrat/mcp-code-context/actions"><img src="https://img.shields.io/github/actions/workflow/status/nikondrat/mcp-code-context/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI&labelColor=1E293B&color=3B82F6" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-3B82F6?style=flat-square&labelColor=1E293B" alt="License"></a>
   <img src="https://img.shields.io/badge/Status-Beta-3B82F6?style=flat-square&labelColor=1E293B" alt="Beta">
 </p>
@@ -99,7 +99,7 @@ pip install mcp-code-context
 ### source (bleeding edge)
 
 ```bash
-git clone https://github.com/nikondrat/code-context.git
+git clone https://github.com/nikondrat/mcp-code-context.git
 cd code-context
 uv sync
 uv run python -m code_context.server --skip-index
@@ -241,7 +241,7 @@ uv run pytest tests/ -v
 # uv run mypy src/
 ```
 
-PRs welcome. See [open issues](https://github.com/nikondrat/code-context/issues).
+PRs welcome. See [open issues](https://github.com/nikondrat/mcp-code-context/issues).
 
 ---
 
