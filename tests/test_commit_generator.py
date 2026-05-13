@@ -1,11 +1,21 @@
 """Unit tests for CommitGenerator — Ollama calls mocked."""
 
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from change_intel import ChangedFile, CompactChange
 from commit_generator import CommitGenerator, CommitGeneratorConfig, _build_prompt, _sanitize, _looks_valid
-from ollama_client import OllamaUnavailableError
+
+
+def _mock_router(*responses):
+    router = MagicMock()
+    queue = list(responses)
+
+    def _next(*_args, **_kwargs):
+        return queue.pop(0)
+
+    router.generate.side_effect = _next
+    return router
 
 
 def _make_cc(files, cues=None):
@@ -65,37 +75,36 @@ class TestBuildPrompt(unittest.TestCase):
 
 class TestCommitGeneratorOllama(unittest.TestCase):
     def _gen(self, model="gemma3:1b"):
-        return CommitGenerator(CommitGeneratorConfig(model=model))
+        return CommitGenerator(CommitGeneratorConfig(local_model=model, router=MagicMock(), remote_model=""))
 
-    @patch("commit_generator.OllamaClient")
-    def test_uses_ollama_when_available(self, MockClient):
-        instance = MockClient.return_value
-        instance.generate.return_value = "feat(auth): add login endpoint"
+    def test_uses_ollama_when_available(self):
+        router = _mock_router(MagicMock(ok=True, text="feat(auth): add login endpoint", provider="ollama", model="gemma3:1b"))
         cc = _make_cc([ChangedFile("src/auth.py", "added", 10, 0)])
-        draft = self._gen().generate(cc)
+        draft = CommitGenerator(CommitGeneratorConfig(local_model="gemma3:1b", remote_model="", router=router)).generate(cc)
         self.assertEqual(draft.message, "feat(auth): add login endpoint")
         self.assertEqual(draft.source, "ollama:gemma3:1b")
         self.assertFalse(draft.fallback)
 
-    @patch("commit_generator.OllamaClient")
-    def test_falls_back_on_unavailable(self, MockClient):
-        instance = MockClient.return_value
-        instance.generate.side_effect = OllamaUnavailableError("connection refused")
+    def test_falls_back_on_unavailable(self):
+        router = _mock_router(MagicMock(ok=False, error_reason="provider unavailable: connection refused", provider="ollama", model="gemma3:1b"))
         cc = _make_cc([ChangedFile("src/fix.py", "modified", 2, 1)])
-        draft = self._gen().generate(cc)
+        draft = CommitGenerator(CommitGeneratorConfig(local_model="gemma3:1b", router=router)).generate(cc)
         self.assertEqual(draft.source, "heuristic")
-        self.assertIn("ollama unavailable", draft.rationale)
+        self.assertIn("provider unavailable", draft.rationale)
 
-    @patch("commit_generator.OllamaClient")
-    def test_falls_back_on_invalid_model_output(self, MockClient):
-        instance = MockClient.return_value
-        instance.generate.return_value = "This is not a conventional commit message at all."
+    def test_falls_back_on_invalid_model_output(self):
+        router = _mock_router(
+            MagicMock(ok=True, text="This is not a conventional commit message at all.", provider="ollama", model="gemma3:1b"),
+            MagicMock(ok=True, text="fix(auth): handle null login", provider="openrouter", model="openai/gpt-4o-mini"),
+        )
         cc = _make_cc([ChangedFile("src/x.py", "modified", 1, 1)])
-        draft = self._gen().generate(cc)
-        self.assertEqual(draft.source, "heuristic")
+        draft = CommitGenerator(
+            CommitGeneratorConfig(local_model="gemma3:1b", remote_model="openai/gpt-4o-mini", router=router)
+        ).generate(cc)
+        self.assertEqual(draft.source, "openrouter:openai/gpt-4o-mini")
 
     def test_no_model_uses_heuristic_directly(self):
-        gen = CommitGenerator(CommitGeneratorConfig(model=""))
+        gen = CommitGenerator(CommitGeneratorConfig(local_model="", remote_model="", router=MagicMock()))
         cc = _make_cc([ChangedFile("src/y.py", "modified", 3, 0)])
         draft = gen.generate(cc)
         self.assertEqual(draft.source, "heuristic")

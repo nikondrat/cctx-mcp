@@ -6,13 +6,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from llm.contracts import LLMResponse
 from vector_index import VectorIndex, _extract_chunks, _file_hash, Chunk
 
 
 def _mock_client(dim: int = 8):
-    """Return a mock OllamaClient that returns a fixed-dim random-ish vector."""
+    """Return a mock router that returns a fixed-dim random-ish vector."""
     import hashlib
-    client = MagicMock()
+    router = MagicMock()
 
     def fake_embed(model: str, text: str) -> list[float]:
         seed = int(hashlib.md5(text.encode()).hexdigest()[:8], 16)
@@ -20,8 +21,18 @@ def _mock_client(dim: int = 8):
         rng = random.Random(seed)
         return [rng.random() for _ in range(dim)]
 
-    client.embed.side_effect = fake_embed
-    return client
+    def route_embed(*, text: str, local_model: str, remote_model: str, force_provider=None):
+        embedding = fake_embed(local_model or remote_model, text)
+        return MagicMock(
+            ok=True,
+            embedding=embedding,
+            provider="ollama",
+            model=local_model or remote_model,
+            error_reason="",
+        )
+
+    router.embed.side_effect = route_embed
+    return router
 
 
 class TestExtractChunks(unittest.TestCase):
@@ -57,7 +68,7 @@ class TestVectorIndexSearch(unittest.TestCase):
         for name, content in files.items():
             (project / name).write_text(content)
         client = _mock_client()
-        idx = VectorIndex(project, client, model="nomic-embed-text")
+        idx = VectorIndex(project, client, local_model="nomic-embed-text", remote_model="")
         idx.index_project()
         return idx, project
 
@@ -87,13 +98,13 @@ class TestVectorIndexSearch(unittest.TestCase):
             (project / "mod.py").write_text("def greet(name):\n    return f'hello {name}'\n")
             client = _mock_client()
 
-            idx1 = VectorIndex(project, client, model="nomic-embed-text")
+            idx1 = VectorIndex(project, client, local_model="nomic-embed-text", remote_model="")
             idx1.index_project()
             count_embedded = client.embed.call_count
 
             # Second instance: should load from disk, no re-embedding
             client2 = _mock_client()
-            idx2 = VectorIndex(project, client2, model="nomic-embed-text")
+            idx2 = VectorIndex(project, client2, local_model="nomic-embed-text", remote_model="")
             idx2._load_from_disk()
             results = idx2.search("greeting function", top_k=1)
             # embed should not have been called for indexing (loaded from disk)
@@ -103,9 +114,27 @@ class TestVectorIndexSearch(unittest.TestCase):
     def test_empty_project_returns_no_results(self):
         with tempfile.TemporaryDirectory() as tmp:
             client = _mock_client()
-            idx = VectorIndex(tmp, client, model="nomic-embed-text")
+            idx = VectorIndex(tmp, client, local_model="nomic-embed-text", remote_model="")
             idx._chunks = []
             idx._vectors = None
             idx._loaded = True
             results = idx.search("anything")
             self.assertEqual(results, [])
+
+    def test_search_raises_runtime_error_when_embed_fails(self):
+        import numpy as np
+        router = MagicMock()
+        router.embed.return_value = MagicMock(
+            ok=False,
+            embedding=None,
+            provider="ollama",
+            model="nomic-embed-text",
+            error_reason="provider unavailable: ollama",
+        )
+        idx = VectorIndex("/tmp", router, local_model="nomic-embed-text", remote_model="")
+        idx._chunks = [Chunk(chunk_id="1", file="test.py", line_start=1, symbol="test", snippet="test", file_hash="abc")]
+        idx._vectors = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
+        idx._loaded = True
+        with self.assertRaises(RuntimeError) as ctx:
+            idx.search("test query")
+        self.assertIn("provider unavailable", str(ctx.exception))

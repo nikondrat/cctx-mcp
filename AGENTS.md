@@ -121,7 +121,7 @@ code_search(project_path="/project", pattern="TODO|FIXME", file_pattern="*.py")
 
 ```
 1. compact_change_intelligence(project_path)   → understand what changed
-2. draft_commit(project_path)                  → generate candidate message (Ollama if available)
+2. draft_commit(project_path)                  → generate candidate message (local-first router)
 3. approve_commit_draft(project_path, message?) → execute git commit
 ```
 
@@ -132,10 +132,14 @@ Never run `git commit` directly. The gate ensures message quality and prevents a
 ## Observability
 
 ### `get_config()`
-Current feature flag state (which Ollama models active, flags enabled/disabled).
+Current feature flag state (routing mode, providers, models, and rollout flags).
 
 ### `get_metrics_report()`
 Cache hit rate, summary latency, token reduction estimates, draft acceptance rate.
+
+### `get_metrics_events(limit?)`
+Recent tool-call records (timestamp, tool name, latency, success/error) from
+`~/.code-context-cache/metrics/events.jsonl`.
 
 ---
 
@@ -145,10 +149,24 @@ Cache hit rate, summary latency, token reduction estimates, draft acceptance rat
 |---------|---------|--------|
 | `CC_SEMANTIC_SUMMARIES` | `1` | Enable semantic symbol summaries |
 | `CC_COMMIT_DRAFTING` | `1` | Enable commit draft generation |
-| `CC_COMMIT_MODEL` | `gemma4:latest` | Ollama model for commit messages (`""` = heuristic fallback) |
-| `CC_EMBED_MODEL` | `nomic-embed-text` | Ollama model for embeddings (`""` = disable semantic_search) |
+| `CC_LLM_ROUTER` | `local-first` | Routing policy: `local-first`, `local-only`, `remote-first`, `remote-only` |
+| `CC_LOCAL_PROVIDER` | `ollama` | Local provider identifier |
+| `CC_REMOTE_PROVIDER` | `openrouter` | Remote provider identifier |
+| `CC_COMMIT_MODEL` | `gemma4:latest` | Local model for commit generation (`""` = disable local commit generation) |
+| `CC_EMBED_MODEL` | `nomic-embed-text` | Local model for embeddings (`""` = disable local embeddings) |
 | `CC_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
 | `CC_OLLAMA_TIMEOUT` | `10` | Request timeout in seconds |
+| `CC_OPENROUTER_API_KEY` | `` | OpenRouter API key (required for remote modes/fallback) |
+| `CC_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base URL |
+| `CC_OPENROUTER_TIMEOUT` | `10` | OpenRouter request timeout in seconds |
+| `CC_OPENROUTER_EMBED_MODEL` | `text-embedding-3-small` | Remote embeddings model |
+| `CC_OPENROUTER_COMMIT_MODEL` | `openai/gpt-4o-mini` | Remote commit model |
+| `CC_OPENROUTER_MAX_TOKENS` | `256` | Max generation tokens for remote commit drafting |
+| `CC_OPENROUTER_TEMPERATURE` | `0.1` | Sampling temperature for remote commit drafting |
+
+Notes:
+- `local-first` prioritizes Ollama for privacy/latency and falls back to OpenRouter.
+- If OpenRouter token is missing, remote calls fail safely with explicit `provider unavailable` errors.
 
 ---
 

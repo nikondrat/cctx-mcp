@@ -80,3 +80,36 @@ def test_no_changes_draft():
 
     draft = generate_commit_draft(cc)
     assert draft.fallback
+
+
+def test_semantic_search_returns_unavailable_when_providers_down():
+    import os
+    import tempfile
+    from pathlib import Path
+    import server
+
+    orig_url = os.environ.get("CC_OLLAMA_URL")
+    orig_key = os.environ.get("CC_OPENROUTER_API_KEY")
+    try:
+        os.environ["CC_OLLAMA_URL"] = "http://127.0.0.1:1"
+        if "CC_OPENROUTER_API_KEY" in os.environ:
+            del os.environ["CC_OPENROUTER_API_KEY"]
+        server._llm_router = None
+        server._vector_indexes = {}
+
+        project = Path(tempfile.mkdtemp())
+        (project / "test.py").write_text("x = 1\ny = 2\n")
+
+        result = server.semantic_search(query="test", project_path=str(project))
+        assert "unavailable" in result.lower() or "error" in result.lower(), f"Expected unavailable/error, got: {result}"
+    finally:
+        if orig_url is not None:
+            os.environ["CC_OLLAMA_URL"] = orig_url
+        else:
+            os.environ.pop("CC_OLLAMA_URL", None)
+        if orig_key is not None:
+            os.environ["CC_OPENROUTER_API_KEY"] = orig_key
+        else:
+            os.environ.pop("CC_OPENROUTER_API_KEY", None)
+        server._llm_router = None
+        server._vector_indexes = {}

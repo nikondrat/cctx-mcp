@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
-from ollama_client import OllamaClient, OllamaConfig, OllamaUnavailableError
+from llm.router import LLMRouter
 
 
 # ── data model ────────────────────────────────────────────────────────────────
@@ -41,6 +40,13 @@ class SearchResult:
     symbol: str
     snippet: str
     score: float
+
+
+@dataclass
+class IndexMetadata:
+    provider_name: str
+    model: str
+    embedding_dim: int
 
 
 # ── cosine similarity (pure stdlib + numpy) ───────────────────────────────────
@@ -80,7 +86,7 @@ def _cache_dir(project_path: Path) -> Path:
 
 # ── index ─────────────────────────────────────────────────────────────────────
 
-_SOURCE_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".swift", ".go", ".rs", ".dart"}
+_SOURCE_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".swift", ".go", ".rs", ".dart", ".md", ".mdx", ".markdown"}
 _MAX_SNIPPET_CHARS = 400
 
 
@@ -121,7 +127,46 @@ def _extract_chunks(file_path: Path, project_path: Path) -> list[Chunk]:
         chunks.append(Chunk(chunk_id=cid, file=rel, line_start=start, symbol=symbol, snippet=snippet, file_hash=fhash))
 
     import re
+
     _def_re = re.compile(r"^(def |class |func |fn |function |pub fn |public |private |@interface |struct |enum )\s*(\w+)")
+    _md_heading_re = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
+
+    if file_path.suffix.lower() in {".md", ".markdown", ".mdx"}:
+        chunks = []
+        heading = "<document>"
+        start = 1
+        buf: list[str] = []
+
+        def _flush_md(title: str, line_start: int, lines_buf: list[str]) -> None:
+            snippet = "\n".join(lines_buf).strip()[:_MAX_SNIPPET_CHARS]
+            if not snippet:
+                return
+            cid = hashlib.md5(f"{rel}:{line_start}:{title}".encode()).hexdigest()[:12]
+            chunks.append(
+                Chunk(
+                    chunk_id=cid,
+                    file=rel,
+                    line_start=line_start,
+                    symbol=title,
+                    snippet=snippet,
+                    file_hash=fhash,
+                )
+            )
+
+        for i, line in enumerate(lines, 1):
+            m = _md_heading_re.match(line)
+            if m:
+                if buf:
+                    _flush_md(heading, start, buf)
+                heading = m.group(1).strip() or "<section>"
+                start = i
+                buf = [line]
+            else:
+                buf.append(line)
+
+        _flush_md(heading, start, buf)
+        if chunks:
+            return chunks
 
     for i, line in enumerate(lines, 1):
         m = _def_re.match(line.lstrip())
@@ -148,23 +193,26 @@ class VectorIndex:
     """Persistent embedding index for a single project.
 
     Usage:
-        idx = VectorIndex(project_path, OllamaClient(...), model="nomic-embed-text")
+        idx = VectorIndex(project_path, router, local_model="nomic-embed-text")
         results = idx.search("user authentication token", top_k=5)
     """
 
     def __init__(
         self,
         project_path: str | Path,
-        client: OllamaClient,
-        model: str = "nomic-embed-text",
+        router: LLMRouter,
+        local_model: str = "nomic-embed-text",
+        remote_model: str = "text-embedding-3-small",
     ) -> None:
         self._project = Path(project_path)
-        self._client = client
-        self._model = model
+        self._router = router
+        self._local_model = local_model
+        self._remote_model = remote_model
         self._cache = _cache_dir(self._project)
 
         self._chunks: list[Chunk] = []
         self._vectors: Optional["np.ndarray"] = None  # type: ignore[name-defined]
+        self._meta: Optional[IndexMetadata] = None
         self._loaded = False
 
     # ── public ────────────────────────────────────────────────────────────
@@ -177,7 +225,36 @@ class VectorIndex:
         if not self._chunks or self._vectors is None:
             return []
 
-        query_vec = self._client.embed(self._model, query)
+        query_response = self._router.embed(
+            text=query,
+            local_model=self._local_model,
+            remote_model=self._remote_model,
+        )
+        if not query_response.ok or query_response.embedding is None:
+            raise RuntimeError(query_response.error_reason or "provider unavailable")
+
+        query_meta = IndexMetadata(
+            provider_name=query_response.provider,
+            model=query_response.model,
+            embedding_dim=len(query_response.embedding),
+        )
+        if self._meta and self._meta != query_meta:
+            self.index_project(force=True)
+            query_response = self._router.embed(
+                text=query,
+                local_model=self._local_model,
+                remote_model=self._remote_model,
+            )
+            if not query_response.ok or query_response.embedding is None:
+                raise RuntimeError(query_response.error_reason or "provider unavailable")
+            query_meta = IndexMetadata(
+                provider_name=query_response.provider,
+                model=query_response.model,
+                embedding_dim=len(query_response.embedding),
+            )
+
+        self._meta = query_meta
+        query_vec = query_response.embedding
         qv = np.array(query_vec, dtype=np.float32)
         norm = float(np.linalg.norm(qv))
         if norm == 0:
@@ -192,18 +269,30 @@ class VectorIndex:
 
         k = min(top_k, len(self._chunks))
         top_indices = scores.argsort()[-k:][::-1]
+        max_score = float(max(float(scores[i]) for i in top_indices)) if k > 0 else 0.0
 
-        return [
-            SearchResult(
-                file=self._chunks[i].file,
-                line=self._chunks[i].line_start,
-                symbol=self._chunks[i].symbol,
-                snippet=self._chunks[i].snippet,
-                score=round(float(scores[i]), 4),
+        seen_files: set[str] = set()
+        output: list[SearchResult] = []
+        for i in top_indices:
+            raw_score = float(scores[i])
+            if raw_score <= 0:
+                continue
+            file_name = self._chunks[i].file
+            if file_name in seen_files:
+                continue
+            seen_files.add(file_name)
+            normalized = raw_score / max_score if max_score > 0 else raw_score
+            output.append(
+                SearchResult(
+                    file=file_name,
+                    line=self._chunks[i].line_start,
+                    symbol=self._chunks[i].symbol,
+                    snippet=self._chunks[i].snippet,
+                    score=round(float(normalized), 4),
+                )
             )
-            for i in top_indices
-            if scores[i] > 0
-        ]
+
+        return output
 
     def index_project(self, force: bool = False) -> int:
         """Index (or incrementally update) the project. Returns number of chunks embedded."""
@@ -238,9 +327,26 @@ class VectorIndex:
 
         # Embed new chunks
         new_vecs: list[list[float]] = []
+        expected_meta: Optional[IndexMetadata] = None
         for ch in new_chunks:
-            vec = self._client.embed(self._model, f"{ch.symbol}\n{ch.snippet}")
-            new_vecs.append(vec)
+            response = self._router.embed(
+                text=f"{ch.symbol}\n{ch.snippet}",
+                local_model=self._local_model,
+                remote_model=self._remote_model,
+            )
+            if not response.ok or response.embedding is None:
+                raise RuntimeError(response.error_reason or "provider unavailable")
+
+            meta = IndexMetadata(
+                provider_name=response.provider,
+                model=response.model,
+                embedding_dim=len(response.embedding),
+            )
+            if expected_meta is None:
+                expected_meta = meta
+            elif expected_meta != meta:
+                raise RuntimeError("provider unavailable: embedding provider/model changed during indexing")
+            new_vecs.append(response.embedding)
 
         # Merge
         ordered_chunks = reuse_chunks + new_chunks
@@ -249,6 +355,8 @@ class VectorIndex:
 
         self._chunks = ordered_chunks
         self._vectors = np.array(all_vecs, dtype=np.float32) if all_vecs else None
+        if expected_meta:
+            self._meta = expected_meta
         self._save_to_disk()
         return len(new_chunks)
 
@@ -266,22 +374,33 @@ class VectorIndex:
 
         chunks_path = self._cache / "chunks.json"
         vectors_path = self._cache / "vectors.npy"
+        meta_path = self._cache / "meta.json"
         if not chunks_path.exists() or not vectors_path.exists():
             return
         try:
             raw = json.loads(chunks_path.read_text())
             self._chunks = [Chunk(**c) for c in raw]
             self._vectors = np.load(str(vectors_path))
+            if meta_path.exists():
+                self._meta = IndexMetadata(**json.loads(meta_path.read_text()))
+            else:
+                # Legacy index without provider/model metadata must be rebuilt.
+                self._chunks = []
+                self._vectors = None
             self._loaded = True
         except Exception:
             self._chunks = []
             self._vectors = None
+            self._meta = None
 
     def _save_to_disk(self) -> None:
         import numpy as np
 
         chunks_path = self._cache / "chunks.json"
         vectors_path = self._cache / "vectors.npy"
+        meta_path = self._cache / "meta.json"
         chunks_path.write_text(json.dumps([asdict(c) for c in self._chunks], indent=2))
         if self._vectors is not None:
             np.save(str(vectors_path), self._vectors)
+        if self._meta is not None:
+            meta_path.write_text(json.dumps(asdict(self._meta), indent=2))

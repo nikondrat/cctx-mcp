@@ -1,10 +1,12 @@
 """MCP Server for code-context - efficient code analysis for AI agents."""
 
 import asyncio
+import functools
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
 
@@ -12,8 +14,10 @@ from cache import Cache, _file_hash
 from change_intel import CompactChangeIntel, CommitGate
 from commit_generator import CommitGenerator, CommitGeneratorConfig
 from config import CodeContextConfig
+from llm.providers.ollama import OllamaProvider
+from llm.providers.openrouter import OpenRouterProvider
+from llm.router import LLMRouter
 from metrics import get_metrics
-from ollama_client import OllamaClient
 from search import ProjectSearch
 from summaries import SemanticSummarizer
 from vector_index import VectorIndex
@@ -36,19 +40,68 @@ mcp = FastMCP("code-context")
 _cache: Optional[Cache] = None
 _searches: dict[str, ProjectSearch] = {}
 _vector_indexes: dict[str, VectorIndex] = {}
+_llm_router: Optional[LLMRouter] = None
+
+
+def _result_ok(result: Any) -> bool:
+    if isinstance(result, str):
+        lowered = result.lower()
+        if lowered.startswith("error:"):
+            return False
+        if " unavailable" in lowered:
+            return False
+        if " failed" in lowered:
+            return False
+    return True
+
+
+def _instrument_tool(tool_name: str):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            started = time.perf_counter()
+            ok = True
+            try:
+                result = func(*args, **kwargs)
+                ok = _result_ok(result)
+                return result
+            except Exception:
+                ok = False
+                raise
+            finally:
+                latency_ms = int((time.perf_counter() - started) * 1000)
+                get_metrics().record_call(tool_name, latency_ms=latency_ms, ok=ok)
+
+        return wrapper
+
+    return decorator
 
 
 def _get_config() -> CodeContextConfig:
     return CodeContextConfig()
 
 
+def _get_llm_router() -> LLMRouter:
+    global _llm_router
+    if _llm_router is None:
+        cfg = _get_config()
+        local = OllamaProvider(cfg.ollama_provider)
+        remote = OpenRouterProvider(cfg.openrouter)
+        _llm_router = LLMRouter(local_provider=local, remote_provider=remote, config=cfg.llm_router)
+    return _llm_router
+
+
 def _get_vector_index(project_path: str) -> Optional[VectorIndex]:
     cfg = _get_config()
-    if not cfg.embed_model:
+    if not cfg.embed_model and not cfg.openrouter_embed_model:
         return None
     if project_path not in _vector_indexes:
-        client = OllamaClient(cfg.ollama)
-        _vector_indexes[project_path] = VectorIndex(project_path, client, cfg.embed_model)
+        _vector_indexes[project_path] = VectorIndex(
+            project_path,
+            _get_llm_router(),
+            local_model=cfg.embed_model,
+            remote_model=cfg.openrouter_embed_model,
+        )
     return _vector_indexes[project_path]
 
 
@@ -68,6 +121,7 @@ def get_search(project_path: str) -> ProjectSearch:
 
 
 @mcp.tool()
+@_instrument_tool("smart_read")
 def smart_read(file_path: str, project_path: Optional[str] = None) -> str:
     """Read a file and return structured analysis instead of full content.
 
@@ -95,6 +149,7 @@ def smart_read(file_path: str, project_path: Optional[str] = None) -> str:
 
 
 @mcp.tool()
+@_instrument_tool("find_symbols")
 def find_symbols(
     project_path: str,
     name: Optional[str] = None,
@@ -131,6 +186,7 @@ def find_symbols(
 
 
 @mcp.tool()
+@_instrument_tool("get_dependencies")
 def get_dependencies(file_path: str, project_path: Optional[str] = None) -> str:
     """Get dependencies/imports of a file.
 
@@ -157,6 +213,7 @@ def get_dependencies(file_path: str, project_path: Optional[str] = None) -> str:
 
 
 @mcp.tool()
+@_instrument_tool("trace_calls")
 def trace_calls(symbol_name: str, project_path: str) -> str:
     """Find where a symbol is called/used across the project.
 
@@ -185,6 +242,7 @@ def trace_calls(symbol_name: str, project_path: str) -> str:
 
 
 @mcp.tool()
+@_instrument_tool("analyze_project")
 def analyze_project(project_path: str, max_depth: int = 2) -> str:
     """Analyze overall project structure.
 
@@ -235,6 +293,7 @@ def analyze_project(project_path: str, max_depth: int = 2) -> str:
 
 
 @mcp.tool()
+@_instrument_tool("get_symbol_summaries")
 def get_symbol_summaries(file_path: str, project_path: Optional[str] = None) -> str:
     """Get semantic summaries for all symbols in a file.
 
@@ -278,6 +337,7 @@ def get_symbol_summaries(file_path: str, project_path: Optional[str] = None) -> 
 
 
 @mcp.tool()
+@_instrument_tool("code_search")
 def code_search(
     project_path: str,
     pattern: str,
@@ -331,6 +391,7 @@ def code_search(
 
 
 @mcp.tool()
+@_instrument_tool("find_files")
 def find_files(
     project_path: str,
     name_pattern: Optional[str] = None,
@@ -376,6 +437,7 @@ def find_files(
 
 
 @mcp.tool()
+@_instrument_tool("dir_summary")
 def dir_summary(
     project_path: str,
     dir_path: Optional[str] = None,
@@ -400,16 +462,16 @@ def dir_summary(
 
 
 @mcp.tool()
+@_instrument_tool("semantic_search")
 def semantic_search(
     query: str,
     project_path: str,
     top_k: int = 5,
 ) -> str:
-    """Search codebase by natural language query using embeddings (Ollama).
+    """Search codebase by natural language query using routed embeddings.
 
     Fastest path for "find where X is done" questions — returns relevant code
-    chunks ranked by semantic similarity, not full files.  Requires
-    CC_EMBED_MODEL to be set (default: nomic-embed-text) and Ollama running.
+    chunks ranked by semantic similarity, not full files.
 
     Args:
         query: Natural language description of what you're looking for
@@ -425,12 +487,12 @@ def semantic_search(
 
     index = _get_vector_index(project_path)
     if index is None:
-        return "semantic_search unavailable: CC_EMBED_MODEL is not set. Use find_symbols or code_search instead."
+        return "semantic_search unavailable: no embedding model configured. Use find_symbols or code_search instead."
 
     try:
         results = index.search(query, top_k=top_k)
     except Exception as exc:
-        return f"semantic_search error (Ollama unavailable?): {exc}"
+        return f"semantic_search error: {exc}"
 
     if not results:
         return "No results found. Try re-indexing or using find_symbols."
@@ -444,6 +506,7 @@ def semantic_search(
 
 
 @mcp.tool()
+@_instrument_tool("get_config")
 def get_config() -> str:
     """Show current feature flag configuration."""
     cfg = _get_config()
@@ -451,18 +514,42 @@ def get_config() -> str:
     for k, v in cfg.as_dict().items():
         lines.append(f"  {k}: {v}")
     lines.append("")
-    lines.append("Env vars: CC_SEMANTIC_SUMMARIES, CC_COMMIT_DRAFTING,")
-    lines.append("          CC_COMMIT_MODEL, CC_EMBED_MODEL, CC_OLLAMA_URL, CC_OLLAMA_TIMEOUT")
+    lines.append("Env vars: CC_SEMANTIC_SUMMARIES, CC_COMMIT_DRAFTING, CC_LLM_ROUTER,")
+    lines.append("          CC_LOCAL_PROVIDER, CC_REMOTE_PROVIDER, CC_COMMIT_MODEL, CC_EMBED_MODEL,")
+    lines.append("          CC_OLLAMA_URL, CC_OLLAMA_TIMEOUT, CC_OPENROUTER_API_KEY,")
+    lines.append("          CC_OPENROUTER_BASE_URL, CC_OPENROUTER_TIMEOUT,")
+    lines.append("          CC_OPENROUTER_EMBED_MODEL, CC_OPENROUTER_COMMIT_MODEL,")
+    lines.append("          CC_OPENROUTER_MAX_TOKENS, CC_OPENROUTER_TEMPERATURE")
     return "\n".join(lines)
 
 
 @mcp.tool()
+@_instrument_tool("get_metrics_report")
 def get_metrics_report() -> str:
     """Show operational metrics (cache hit rate, latencies, etc.)."""
     return get_metrics().report()
 
 
 @mcp.tool()
+@_instrument_tool("get_metrics_events")
+def get_metrics_events(limit: int = 25) -> str:
+    """Show recent recorded tool-call events."""
+    metrics = get_metrics()
+    events = metrics.recent_events(limit=limit)
+    if not events:
+        return "No metrics events recorded yet."
+
+    lines = [f"Recent metrics events ({len(events)}):"]
+    for event in events:
+        status = "ok" if event.get("ok") else "error"
+        lines.append(
+            f"  ts={event.get('ts')} tool={event.get('tool')} latency_ms={event.get('latency_ms')} status={status}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+@_instrument_tool("compact_change_intelligence")
 def compact_change_intelligence(
     project_path: str,
     staged: bool = False,
@@ -498,6 +585,7 @@ def compact_change_intelligence(
 
 
 @mcp.tool()
+@_instrument_tool("draft_commit")
 def draft_commit(project_path: str) -> str:
     """Generate a local commit draft from working tree changes.
 
@@ -521,7 +609,15 @@ def draft_commit(project_path: str) -> str:
         return "No changes to commit."
 
     cfg = _get_config()
-    generator = CommitGenerator(CommitGeneratorConfig(model=cfg.commit_model, ollama=cfg.ollama))
+    generator = CommitGenerator(
+        CommitGeneratorConfig(
+            local_model=cfg.commit_model,
+            remote_model=cfg.openrouter_commit_model,
+            temperature=cfg.openrouter.temperature,
+            max_tokens=cfg.openrouter.max_tokens,
+            router=_get_llm_router(),
+        )
+    )
     draft = generator.generate(cc)
 
     gate = get_commit_gate()
@@ -537,6 +633,7 @@ def draft_commit(project_path: str) -> str:
 
 
 @mcp.tool()
+@_instrument_tool("approve_commit_draft")
 def approve_commit_draft(project_path: str, message: Optional[str] = None) -> str:
     """Approve or edit the pending commit draft and execute the commit.
 
