@@ -150,30 +150,51 @@ class ProjectSearch:
         """Find where a symbol is called/used."""
         search_path = project_path or self.project_path
         results = []
+        seen: set[tuple[str, int]] = set()
 
-        # Search for symbol definition first
-        definitions = self.find_symbols(search_path, name=symbol_name)
-        if not definitions:
-            return results
+        # Dotted paths (e.g. Class.method) are common in queries; use final token for lookups.
+        parts = [p for p in symbol_name.split(".") if p]
+        short_symbol = parts[-1] if parts else symbol_name
+
+        definitions = self.find_symbols(search_path, name=short_symbol)
+        definition_files = {d["file"] for d in definitions}
+
+        call_patterns = []
+        if short_symbol:
+            escaped = re.escape(short_symbol)
+            call_patterns = [
+                re.compile(rf"\.{escaped}\s*\("),
+                re.compile(rf"\b{escaped}\s*\("),
+            ]
+        full_symbol = symbol_name.strip()
 
         # Now search for usages in other files
         for file_path in self._iter_source_files(search_path):
             # Skip files where symbol is defined
-            if any(d["file"] == str(file_path.relative_to(self.project_path)) for d in definitions):
+            rel_path = str(file_path.relative_to(self.project_path))
+            if rel_path in definition_files:
                 continue
 
             # Read file content and search for symbol name
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
-                if symbol_name in content:
-                    # Find line numbers where symbol appears
-                    for i, line in enumerate(content.splitlines(), 1):
-                        if symbol_name in line:
-                            results.append({
-                                "file": str(file_path.relative_to(self.project_path)),
-                                "line": i,
-                                "context": line.strip()[:100],
-                            })
+                lines = content.splitlines()
+                for i, line in enumerate(lines, 1):
+                    matches_full = bool(full_symbol and full_symbol in line)
+                    matches_call = any(pattern.search(line) for pattern in call_patterns)
+                    if not (matches_full or matches_call):
+                        continue
+
+                    key = (rel_path, i)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    results.append({
+                        "file": rel_path,
+                        "line": i,
+                        "context": line.strip()[:100],
+                    })
             except Exception:
                 continue
 
