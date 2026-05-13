@@ -364,7 +364,12 @@ class VectorIndex:
         import numpy as np
 
         self._ensure_indexed()
-        if not self._chunks or self._vectors is None:
+        if not self._chunks:
+            self._last_error = "no files found to index in project"
+            return []
+        if self._vectors is None:
+            if not self._last_error:
+                self._last_error = "index vectors not available — embeddings failed during indexing"
             return []
 
         # Check for stale files and reindex if needed

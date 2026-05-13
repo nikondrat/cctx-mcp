@@ -550,7 +550,6 @@ def semantic_search(
     if index is None:
         return "semantic_search unavailable: no embedding model configured. Use find_symbols or code_search instead."
 
-    index.clear_error()
     try:
         results = index.search(query, top_k=top_k)
     except Exception as exc:
