@@ -102,6 +102,7 @@ def test_semantic_search_returns_unavailable_when_providers_down():
 
         result = server.semantic_search(query="test", project_path=str(project))
         assert "unavailable" in result.lower() or "error" in result.lower(), f"Expected unavailable/error, got: {result}"
+        assert "решение" in result.lower() or "ollama" in result.lower(), f"Expected actionable message, got: {result}"
     finally:
         if orig_url is not None:
             os.environ["CC_OLLAMA_URL"] = orig_url
@@ -113,3 +114,12 @@ def test_semantic_search_returns_unavailable_when_providers_down():
             os.environ.pop("CC_OPENROUTER_API_KEY", None)
         server._llm_router = None
         server._vector_indexes = {}
+
+
+def test_semantic_search_empty_query_returns_message():
+    import server
+    result = server.semantic_search(query="", project_path="/tmp")
+    assert "empty query" in result.lower(), f"Expected empty query message, got: {result}"
+    result = server.semantic_search(query="   ", project_path="/tmp")
+    assert "empty query" in result.lower(), f"Expected empty query message for whitespace, got: {result}"
+

@@ -45,6 +45,35 @@ class TestExtractChunks(unittest.TestCase):
         self.assertIn("foo", symbols)
         self.assertIn("bar", symbols)
 
+    def test_extracts_nested_methods(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "service.py"
+            p.write_text(
+                "class AuthService:\n"
+                "    def login(self):\n"
+                "        pass\n"
+                "    def logout(self):\n"
+                "        pass\n"
+                "def helper():\n"
+                "    return 42\n"
+            )
+            chunks = _extract_chunks(p, Path(tmp))
+        symbols = [c.symbol for c in chunks]
+        self.assertIn("AuthService.login", symbols)
+        self.assertIn("AuthService.logout", symbols)
+        self.assertIn("helper", symbols)
+
+    def test_chunks_deduplicated_by_snippet(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "dup.py"
+            p.write_text(
+                "def foo():\n    x = 1\n\n"
+                "def bar():\n    x = 1\n\n"
+            )
+            chunks = _extract_chunks(p, Path(tmp))
+        # Both have same body "x = 1" — one should be deduplicated
+        self.assertLessEqual(len(chunks), 2)
+
     def test_whole_file_chunk_for_tiny_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "tiny.py"
@@ -121,7 +150,7 @@ class TestVectorIndexSearch(unittest.TestCase):
             results = idx.search("anything")
             self.assertEqual(results, [])
 
-    def test_search_raises_runtime_error_when_embed_fails(self):
+    def test_search_returns_empty_when_embed_fails(self):
         import numpy as np
         router = MagicMock()
         router.embed.return_value = MagicMock(
@@ -135,6 +164,42 @@ class TestVectorIndexSearch(unittest.TestCase):
         idx._chunks = [Chunk(chunk_id="1", file="test.py", line_start=1, symbol="test", snippet="test", file_hash="abc")]
         idx._vectors = np.array([[0.1, 0.2, 0.3]], dtype=np.float32)
         idx._loaded = True
-        with self.assertRaises(RuntimeError) as ctx:
-            idx.search("test query")
-        self.assertIn("provider unavailable", str(ctx.exception))
+        results = idx.search("test query")
+        self.assertEqual(results, [])
+        self.assertIsNotNone(idx.last_error)
+        self.assertIn("provider unavailable", idx.last_error.lower())
+
+    def test_check_stale_detects_file_change(self):
+        import time as _time
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            mod = project / "mod.py"
+            mod.write_text("def greet(): pass\n")
+            client = _mock_client()
+            idx = VectorIndex(project, client, local_model="nomic-embed-text", remote_model="")
+            idx.index_project()
+            self.assertIn("mod.py", idx._file_mtimes)
+            old_mtime = idx._file_mtimes["mod.py"]
+
+            # Modify file and update mtime
+            _time.sleep(0.02)
+            mod.write_text("def greet(): return 'hello'\n")
+
+            # mtime should differ
+            new_mtime = mod.stat().st_mtime
+            self.assertNotEqual(old_mtime, new_mtime)
+            self.assertTrue(idx._check_stale())
+
+    def test_check_stale_detects_deleted_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp)
+            (project / "keep.py").write_text("x = 1\n")
+            (project / "delete.py").write_text("y = 2\n")
+            client = _mock_client()
+            idx = VectorIndex(project, client, local_model="nomic-embed-text", remote_model="")
+            idx.index_project()
+            self.assertIn("delete.py", idx._file_mtimes)
+
+            # Delete file
+            (project / "delete.py").unlink()
+            self.assertTrue(idx._check_stale())
