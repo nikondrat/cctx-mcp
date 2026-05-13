@@ -1,5 +1,6 @@
 """Unit tests for analyze_project tool (inline os.walk logic)."""
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -19,7 +20,7 @@ class TestAnalyzeProject(unittest.TestCase):
             from code_context.search import LANGUAGE_EXTENSIONS
 
             stats = {"files": 0, "languages": {}, "directories": 0}
-            for root, dirs, files in project.walk():
+            for root, dirs, files in os.walk(str(project)):
                 rel = Path(root).relative_to(project)
                 if len(rel.parts) > 2:
                     dirs.clear()

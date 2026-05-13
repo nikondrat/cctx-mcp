@@ -20,7 +20,7 @@ _tool_token_ctx = threading.local()
 from mcp.server.fastmcp import FastMCP
 
 
-SERVER_VERSION = "0.5.2"
+SERVER_VERSION = "0.5.3"
 
 try:
     _commit = subprocess.run(
