@@ -752,6 +752,15 @@ def _execute_commit(repo_path: Path) -> str:
     try:
         with open(repo_path / ".git/COMMIT_EDITMSG", "w") as f:
             f.write(msg)
+        add = subprocess.run(
+            ["git", "add", "-A"],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
+        )
+        if add.returncode != 0:
+            return f"git add failed:\n{add.stderr or add.stdout}"
         result = subprocess.run(
             ["git", "commit", "--file", ".git/COMMIT_EDITMSG"],
             capture_output=True,
@@ -763,7 +772,7 @@ def _execute_commit(repo_path: Path) -> str:
             gate.reject()  # reset for next cycle
             return f"Commit successful:\n{result.stdout}"
         else:
-            return f"Commit failed:\n{result.stderr}"
+            return f"Commit failed:\n{result.stderr or result.stdout}"
     except Exception as e:
         return f"Error: {e}"
 
