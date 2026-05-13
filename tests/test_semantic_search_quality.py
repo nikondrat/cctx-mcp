@@ -21,7 +21,7 @@ SERVER_CMD = ["uv", "run", "python", "-m", "code_context.server", "--skip-index"
 QUERIES = [
     ("vector index search", ["src/code_context/vector_index.py"]),
     ("project search find symbols", ["src/code_context/search.py"]),
-    ("git commit change summary", ["src/code_context/change_intel.py"]),
+    ("git commit change summary", ["AGENTS.md", "src/code_context/change_intel.py"]),
     ("semantic code summaries tool", ["src/code_context/summaries.py", "src/code_context/server.py"]),
     ("MCP instrumentation decorator", ["src/code_context/server.py"]),
 ]

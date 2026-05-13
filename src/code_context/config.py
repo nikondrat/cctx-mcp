@@ -42,7 +42,7 @@ class CodeContextConfig:
         self.openrouter: OpenRouterConfig = OpenRouterConfig(
             api_key=os.environ.get("CC_OPENROUTER_API_KEY", ""),
             base_url=os.environ.get("CC_OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
-            timeout=int(os.environ.get("CC_OPENROUTER_TIMEOUT", os.environ.get("CC_OLLAMA_TIMEOUT", "10"))),
+            timeout=int(os.environ.get("CC_OPENROUTER_TIMEOUT", "15")),
             max_tokens=int(os.environ.get("CC_OPENROUTER_MAX_TOKENS", "256")),
             temperature=float(os.environ.get("CC_OPENROUTER_TEMPERATURE", "0.1")),
         )

@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from llm.contracts import LLMResponse
-from code_context.vector_index import VectorIndex, _extract_chunks, _file_hash, Chunk
+from code_context.vector_index import VectorIndex, _extract_chunks, _file_hash, _chunk_markdown, _regex_extract_chunks, Chunk
 
 
 def _mock_client(dim: int = 8):
@@ -31,7 +31,21 @@ def _mock_client(dim: int = 8):
             error_reason="",
         )
 
+    def route_embed_batch(*, texts: list[str], local_model: str, remote_model: str, force_provider=None):
+        model = local_model or remote_model
+        return [
+            MagicMock(
+                ok=True,
+                embedding=fake_embed(model, t),
+                provider="ollama",
+                model=model,
+                error_reason="",
+            )
+            for t in texts
+        ]
+
     router.embed.side_effect = route_embed
+    router.embed_batch.side_effect = route_embed_batch
     return router
 
 
@@ -88,6 +102,47 @@ class TestExtractChunks(unittest.TestCase):
             chunks = _extract_chunks(p, Path(tmp))
         for c in chunks:
             self.assertLessEqual(len(c.snippet), 420)  # 400 + small overhead
+
+
+class TestRegexExtractChunks(unittest.TestCase):
+    """Direct tests for regex fallback chunking (no tree-sitter)."""
+
+    def test_regex_extracts_python_defs(self):
+        lines = ["def foo():", "    pass", "", "def bar():", "    return 1"]
+        chunks = _regex_extract_chunks(lines, "\n".join(lines), "mod.py", "abc")
+        symbols = [c.symbol for c in chunks]
+        self.assertIn("foo", symbols)
+        self.assertIn("bar", symbols)
+
+    def test_regex_extracts_nested_methods(self):
+        lines = ["class Auth:", "    def login(self):", "        pass", "    def logout(self):", "        pass"]
+        chunks = _regex_extract_chunks(lines, "\n".join(lines), "auth.py", "abc")
+        symbols = [c.symbol for c in chunks]
+        self.assertIn("Auth.login", symbols)
+        self.assertIn("Auth.logout", symbols)
+
+    def test_regex_for_unsupported_language(self):
+        """Files with no tree-sitter analyzer use regex fallback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "script.rb"
+            p.write_text("def hello\n  puts 'hi'\nend\n")
+            chunks = _extract_chunks(p, Path(tmp))
+        symbols = [c.symbol for c in chunks]
+        self.assertIn("hello", symbols)
+
+
+class TestChunkMarkdown(unittest.TestCase):
+    def test_markdown_headings_become_chunks(self):
+        lines = ["# Title", "content", "## Section", "more content"]
+        chunks = _chunk_markdown(lines, "doc.md", "abc")
+        symbols = [c.symbol for c in chunks]
+        self.assertIn("Title", symbols)
+        self.assertIn("Section", symbols)
+
+    def test_markdown_single_file_no_headings(self):
+        lines = ["just text", "no headings"]
+        chunks = _chunk_markdown(lines, "readme.md", "abc")
+        self.assertEqual(len(chunks), 1)
 
 
 class TestVectorIndexSearch(unittest.TestCase):
@@ -203,3 +258,13 @@ class TestVectorIndexSearch(unittest.TestCase):
             # Delete file
             (project / "delete.py").unlink()
             self.assertTrue(idx._check_stale())
+
+    def test_query_cache_reuses_embeddings(self):
+        idx, _ = self._index_with_files({
+            "mod.py": "def greet(): pass\n",
+        })
+        idx.search("hello", top_k=1)
+        idx.search("hello", top_k=1)
+        # Should have called embed_batch for index_project + embed once for query (cached on second call)
+        self.assertEqual(len(idx._query_cache), 1)
+        self.assertIn("hello", idx._query_cache)

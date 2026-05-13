@@ -40,6 +40,36 @@ class TestOllamaClientEmbed(unittest.TestCase):
             self._client().embed("nomic-embed-text", "text")
 
 
+class TestOllamaClientEmbedBatch(unittest.TestCase):
+    def _client(self):
+        return OllamaClient(OllamaConfig(base_url="http://localhost:11434", timeout=5))
+
+    @patch("urllib.request.urlopen")
+    def test_embed_batch_returns_vectors(self, mock_open):
+        mock_open.return_value = _fake_response(
+            {"model": "nomic-embed-text", "embeddings": [[0.1, 0.2], [0.3, 0.4]]}
+        )
+        result = self._client().embed_batch("nomic-embed-text", ["a", "b"])
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0], [0.1, 0.2])
+        self.assertEqual(result[1], [0.3, 0.4])
+
+    @patch("urllib.request.urlopen", side_effect=OllamaUnavailableError("HTTP 404"))
+    def test_embed_batch_fallback_on_404(self, mock_open):
+        with patch.object(OllamaClient, "embed", return_value=[0.5, 0.6]) as mock_embed:
+            result = self._client().embed_batch("nomic-embed-text", ["a", "b"])
+            self.assertEqual(mock_embed.call_count, 2)
+            self.assertEqual(len(result), 2)
+
+    @patch("urllib.request.urlopen")
+    def test_embed_batch_raises_on_mismatch(self, mock_open):
+        mock_open.return_value = _fake_response(
+            {"model": "nomic-embed-text", "embeddings": [[0.1, 0.2]]}
+        )
+        with self.assertRaises(OllamaUnavailableError):
+            self._client().embed_batch("nomic-embed-text", ["a", "b"])
+
+
 class TestOllamaClientGenerate(unittest.TestCase):
     def _client(self):
         return OllamaClient(OllamaConfig())

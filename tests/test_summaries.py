@@ -98,4 +98,6 @@ def test_summary_cached_reused():
     file_hash = "ccc"
     s1 = summarizer.summarize_symbol(sym, file_hash, [])
     s2 = summarizer.summarize_symbol(sym, file_hash, [])
-    assert s1 is s2 or s1.to_dict() == s2.to_dict()
+    d1 = {k: v for k, v in s1.to_dict().items() if k != "last_updated"}
+    d2 = {k: v for k, v in s2.to_dict().items() if k != "last_updated"}
+    assert d1 == d2

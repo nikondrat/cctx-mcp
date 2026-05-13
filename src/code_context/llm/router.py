@@ -46,6 +46,43 @@ class LLMRouter:
             force_provider=force_provider,
         )
 
+    def embed_batch(
+        self,
+        texts: list[str],
+        local_model: str,
+        remote_model: str,
+        force_provider: Optional[str] = None,
+    ) -> list[LLMResponse]:
+        providers = [force_provider] if force_provider else self._provider_order()
+        errors: list[str] = []
+
+        for name in providers:
+            provider = self._providers.get(name)
+            if provider is None:
+                errors.append(f"provider unavailable: {name} not configured")
+                continue
+            if not provider.is_available():
+                errors.append(f"provider unavailable: {name}")
+                continue
+
+            model = local_model if name == self._cfg.local_provider_name else remote_model
+            if not model:
+                errors.append(f"provider unavailable: missing model for {name}")
+                continue
+
+            results = provider.embed_batch(texts, model=model)
+            if any(r.ok for r in results):
+                return results
+            errors.append(results[0].error_reason or f"provider unavailable: {name}")
+
+        err = LLMResponse(
+            provider=providers[-1] if providers else "none",
+            model=remote_model or local_model,
+            latency_ms=0,
+            error_reason="; ".join(errors) if errors else "provider unavailable",
+        )
+        return [err for _ in texts]
+
     def generate(
         self,
         prompt: str,

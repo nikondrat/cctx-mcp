@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from code_context.analyzers.base import FileAnalysis, SemanticSummary, Symbol
+from code_context.metrics import get_metrics
 
 ANALYZER_VERSION = "1.0.0"
 SUMMARY_MODEL_VERSION = "1.0.0"
@@ -57,18 +58,24 @@ class Cache:
         """Get cached analysis if valid (mtime check + staleness)."""
         cache_file = self._analysis_path(file_path)
         if not cache_file.exists():
+            get_metrics().record_cache_miss()
             return None
         try:
             with open(cache_file, "r") as f:
                 data = json.load(f)
             if data.get("mtime", 0) != file_path.stat().st_mtime:
+                get_metrics().record_cache_miss()
                 return None
             if time.time() - data.get("timestamp", 0) > STALE_DAYS * 86400:
+                get_metrics().record_cache_miss()
                 return None
             if data.get("analyzer_version") != ANALYZER_VERSION:
+                get_metrics().record_cache_miss()
                 return None
+            get_metrics().record_cache_hit()
             return self._deserialize(data)
         except Exception:
+            get_metrics().record_cache_miss()
             return None
 
     def put(self, file_path: Path, analysis: FileAnalysis):
@@ -102,6 +109,24 @@ class Cache:
         """Get cached semantic summary if valid (version check)."""
         path = self._summary_path(symbol_id, file_hash)
         if not path.exists():
+            get_metrics().record_cache_miss()
+            return None
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            if data.get("analyzer_version") != ANALYZER_VERSION:
+                get_metrics().record_cache_miss()
+                return None
+            if data.get("summary_model_version") != SUMMARY_MODEL_VERSION:
+                get_metrics().record_cache_miss()
+                return None
+            if time.time() - data.get("timestamp", 0) > STALE_DAYS * 86400:
+                get_metrics().record_cache_miss()
+                return None
+            get_metrics().record_cache_hit()
+            return SemanticSummary(**data)
+        except Exception:
+            get_metrics().record_cache_miss()
             return None
         try:
             with open(path, "r") as f:

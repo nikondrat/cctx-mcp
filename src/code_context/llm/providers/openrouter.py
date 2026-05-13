@@ -69,6 +69,46 @@ class OpenRouterProvider:
                 error_reason=f"provider unavailable: {exc}",
             )
 
+    def embed_batch(self, texts: list[str], model: str) -> list[LLMResponse]:
+        started = time.perf_counter()
+        if not self._cfg.api_key:
+            err = LLMResponse(
+                provider=self.name,
+                model=model,
+                latency_ms=0,
+                error_reason="provider unavailable: missing CC_OPENROUTER_API_KEY",
+            )
+            return [err for _ in texts]
+
+        payload = {"model": model, "input": texts}
+        try:
+            response = self._post("/embeddings", payload)
+            data = response.get("data") or []
+            latency = int((time.perf_counter() - started) * 1000)
+            results: list[LLMResponse] = []
+            for i, item in enumerate(data):
+                emb = (item or {}).get("embedding")
+                if emb:
+                    results.append(LLMResponse(provider=self.name, model=model, latency_ms=latency, embedding=emb))
+                else:
+                    results.append(LLMResponse(provider=self.name, model=model, latency_ms=latency, error_reason=f"invalid response: missing embedding at index {i}"))
+            while len(results) < len(texts):
+                results.append(LLMResponse(provider=self.name, model=model, latency_ms=latency, error_reason="invalid response: missing embedding"))
+            return results
+        except TimeoutError:
+            latency = int((time.perf_counter() - started) * 1000)
+            err = LLMResponse(provider=self.name, model=model, latency_ms=latency, error_reason="timeout")
+            return [err for _ in texts]
+        except Exception as exc:
+            latency = int((time.perf_counter() - started) * 1000)
+            err = LLMResponse(
+                provider=self.name,
+                model=model,
+                latency_ms=latency,
+                error_reason=f"provider unavailable: {exc}",
+            )
+            return [err for _ in texts]
+
     def generate(self, prompt: str, model: str, options: Optional[dict] = None) -> LLMResponse:
         started = time.perf_counter()
         if not self._cfg.api_key:

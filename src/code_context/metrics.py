@@ -28,7 +28,9 @@ TOOL_SAVINGS_FACTOR: dict[str, float] = {
 class Metrics:
     """Collect and report operational metrics."""
 
-    def __init__(self):
+    _DEFAULT_EVENTS_DIR = Path.home() / ".code-context-cache" / "metrics"
+
+    def __init__(self, events_path: Optional[Path] = None):
         self._cache_hits = 0
         self._cache_misses = 0
         self._summary_count = 0
@@ -38,7 +40,16 @@ class Metrics:
         self._calls: dict[str, int] = defaultdict(int)
         self._call_latency_ms: dict[str, int] = defaultdict(int)
         self._call_errors: dict[str, int] = defaultdict(int)
-        self._events_path = Path.home() / ".code-context-cache" / "metrics" / "events.jsonl"
+        if events_path is not None:
+            self._events_path = events_path
+        else:
+            _test_mode = os.environ.get("CC_TEST_MODE")
+            if _test_mode:
+                raise RuntimeError(
+                    "Metrics() without events_path in CC_TEST_MODE would write to production. "
+                    "Pass events_path=Path(tmp)/'events.jsonl' in tests."
+                )
+            self._events_path = self._DEFAULT_EVENTS_DIR / "events.jsonl"
         self._events_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ── cache ────────────────────────────────────────────────────────────

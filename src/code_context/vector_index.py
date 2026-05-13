@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
+from collections import OrderedDict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
@@ -75,7 +77,7 @@ def _file_hash(path: Path) -> str:
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
-    return h.hexdigest()[:16]
+    return h.hexdigest()
 
 
 def _cache_dir(project_path: Path) -> Path:
@@ -336,6 +338,8 @@ class VectorIndex:
         self._loaded = False
         self._last_error: Optional[str] = None
         self._file_mtimes: dict[str, float] = {}
+        self._query_cache: OrderedDict[str, list[float]] = OrderedDict()
+        self._MAX_QUERY_CACHE = 100
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -367,42 +371,32 @@ class VectorIndex:
         if self._check_stale():
             self.index_project()
 
-        query_response = self._router.embed(
-            text=query,
-            local_model=self._local_model,
-            remote_model=self._remote_model,
-        )
-        if not query_response.ok or query_response.embedding is None:
-            self._last_error = query_response.error_reason or "semantic_search unavailable: provider не отвечает"
-            return []
+        # P3: LRU query embed cache
+        query_vec = self._query_cache.get(query)
+        if query_vec is None:
+            # P5: Retry with exponential backoff
+            query_response = None
+            for attempt in range(3):
+                if attempt > 0:
+                    time.sleep(2 ** (attempt - 1))
+                query_response = self._router.embed(
+                    text=query,
+                    local_model=self._local_model,
+                    remote_model=self._remote_model,
+                )
+                if query_response.ok and query_response.embedding is not None:
+                    break
 
-        query_meta = IndexMetadata(
-            provider_name=query_response.provider,
-            model=query_response.model,
-            embedding_dim=len(query_response.embedding),
-        )
-        if self._meta and self._meta != query_meta:
-            try:
-                self.index_project(force=True)
-            except RuntimeError as e:
-                self._last_error = str(e)
+            if query_response is None or not query_response.ok or query_response.embedding is None:
+                self._last_error = query_response.error_reason or "semantic_search unavailable: provider не отвечает"
                 return []
-            query_response = self._router.embed(
-                text=query,
-                local_model=self._local_model,
-                remote_model=self._remote_model,
-            )
-            if not query_response.ok or query_response.embedding is None:
-                self._last_error = query_response.error_reason or "semantic_search unavailable: переиндексация не удалась"
-                return []
-            query_meta = IndexMetadata(
-                provider_name=query_response.provider,
-                model=query_response.model,
-                embedding_dim=len(query_response.embedding),
-            )
 
-        self._meta = query_meta
-        query_vec = query_response.embedding
+            query_vec = query_response.embedding
+            # LRU cache: move to end on insert
+            self._query_cache[query] = query_vec
+            if len(self._query_cache) > self._MAX_QUERY_CACHE:
+                self._query_cache.popitem(last=False)
+
         qv = np.array(query_vec, dtype=np.float32)
         norm = float(np.linalg.norm(qv))
         if norm == 0:
@@ -476,30 +470,33 @@ class VectorIndex:
             self._chunks = reuse_chunks
             return 0  # nothing changed
 
-        # Embed new chunks
+        # Embed new chunks in batches
+        _BATCH_SIZE = 20
         new_vecs: list[list[float]] = []
         expected_meta: Optional[IndexMetadata] = None
-        for ch in new_chunks:
-            response = self._router.embed(
-                text=f"{ch.symbol}\n{ch.snippet}",
+        for i in range(0, len(new_chunks), _BATCH_SIZE):
+            batch = new_chunks[i:i + _BATCH_SIZE]
+            texts = [f"{ch.symbol}\n{ch.snippet}" for ch in batch]
+            responses = self._router.embed_batch(
+                texts=texts,
                 local_model=self._local_model,
                 remote_model=self._remote_model,
             )
-            if not response.ok or response.embedding is None:
-                self._last_error = response.error_reason or "semantic_search unavailable: provider не отвечает при индексации"
-                continue
-
-            meta = IndexMetadata(
-                provider_name=response.provider,
-                model=response.model,
-                embedding_dim=len(response.embedding),
-            )
-            if expected_meta is None:
-                expected_meta = meta
-            elif expected_meta != meta:
-                self._last_error = "embedding provider/model изменился во время индексации"
-                continue
-            new_vecs.append(response.embedding)
+            for ch, response in zip(batch, responses):
+                if not response.ok or response.embedding is None:
+                    self._last_error = response.error_reason or "embedding failed during indexing"
+                    continue
+                meta = IndexMetadata(
+                    provider_name=response.provider,
+                    model=response.model,
+                    embedding_dim=len(response.embedding),
+                )
+                if expected_meta is None:
+                    expected_meta = meta
+                elif expected_meta != meta:
+                    self._last_error = "embedding provider/model changed during indexing"
+                    continue
+                new_vecs.append(response.embedding)
 
         # Merge
         ordered_chunks = reuse_chunks + new_chunks

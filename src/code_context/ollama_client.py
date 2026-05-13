@@ -53,6 +53,26 @@ class OllamaClient:
             raise OllamaUnavailableError(f"No embedding in response: {response}")
         return embedding
 
+    def embed_batch(self, model: str, texts: list[str]) -> list[list[float]]:
+        """Return embedding vectors for *texts* using *model* (single request).
+
+        Uses Ollama /api/embed (batched input). Falls back to per-item
+        /api/embeddings if batch endpoint returns 404 (older Ollama).
+
+        Raises OllamaUnavailableError on any network or HTTP error.
+        """
+        payload = {"model": model, "input": texts}
+        try:
+            response = self._post("/api/embed", payload)
+        except OllamaUnavailableError as exc:
+            if "HTTP 404" in str(exc) or "HTTP 405" in str(exc):
+                return [self.embed(model, t) for t in texts]
+            raise
+        embeddings = response.get("embeddings")
+        if not embeddings or len(embeddings) != len(texts):
+            raise OllamaUnavailableError(f"Expected {len(texts)} embeddings, got {len(embeddings or [])}")
+        return embeddings
+
     def generate(self, model: str, prompt: str, temperature: float = 0.1) -> str:
         """Return generated text (non-streaming) for *prompt* using *model*.
 
