@@ -3,8 +3,8 @@
 import unittest
 from unittest.mock import MagicMock
 
-from change_intel import ChangedFile, CompactChange
-from commit_generator import CommitGenerator, CommitGeneratorConfig, _build_prompt, _sanitize, _looks_valid
+from code_context.change_intel import ChangedFile, CompactChange
+from code_context.commit_generator import CommitGenerator, CommitGeneratorConfig, _build_prompt, _sanitize, _looks_valid
 
 
 def _mock_router(*responses):

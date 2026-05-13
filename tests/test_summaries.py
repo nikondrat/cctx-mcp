@@ -3,12 +3,12 @@
 import tempfile
 from pathlib import Path
 
-from analyzers.base import SemanticSummary, Symbol
-from summaries import SemanticSummarizer
+from code_context.analyzers.base import SemanticSummary, Symbol
+from code_context.summaries import SemanticSummarizer
 
 
 def make_cache():
-    from cache import Cache
+    from code_context.cache import Cache
     return Cache(cache_dir=Path(tempfile.mkdtemp()))
 
 

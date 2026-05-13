@@ -5,7 +5,7 @@ import unittest
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
-from ollama_client import OllamaClient, OllamaConfig, OllamaUnavailableError
+from code_context.ollama_client import OllamaClient, OllamaConfig, OllamaUnavailableError
 
 
 def _fake_response(body: dict, status: int = 200):

@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from change_intel import CompactChangeIntel, CommitGate, generate_commit_draft
+from code_context.change_intel import CompactChangeIntel, CommitGate, generate_commit_draft
 
 
 def _git(*args: str, cwd: Path):

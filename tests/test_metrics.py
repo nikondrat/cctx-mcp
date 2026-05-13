@@ -7,7 +7,7 @@ import unittest
 from datetime import date, datetime
 from pathlib import Path
 
-from metrics import Metrics, TOOL_SAVINGS_FACTOR
+from code_context.metrics import Metrics, TOOL_SAVINGS_FACTOR
 
 
 class TestMetrics(unittest.TestCase):

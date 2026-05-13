@@ -191,11 +191,48 @@ If you catch yourself thinking any of these, STOP — you are rationalizing:
 Current feature flag state (routing mode, providers, models, and rollout flags).
 
 ### `get_metrics_report()`
-Cache hit rate, summary latency, token reduction estimates, draft acceptance rate.
+Cache hit rate, summary latency, **real token savings** (baseline vs actual), draft acceptance rate.
 
 ### `get_metrics_events(limit?)`
-Recent tool-call records (timestamp, tool name, latency, success/error) from
+Recent tool-call records (timestamp, tool name, latency, success/error, tokens) from
 `~/.code-context-cache/metrics/events.jsonl`.
+
+### `reset_metrics()`
+Archive all recorded events and daily snapshots, zero counters. Use before a new session
+or after schema changes. Archives: events.jsonl → events.jsonl.bak, daily/ → daily/archive/.
+
+### `get_metrics_daily_trend(days?)`
+Daily snapshot trend with per-tool call count, latency, errors, and token savings.
+Shows estimate vs real savings for tools with token measurement enabled.
+
+### `get_metrics_slowest(limit?)`
+Top-N slowest tools by average latency with call count and error count.
+
+---
+
+## Real Metrics — Interpreting Token Savings
+
+Every tool call now records actual input/output token counts and an estimated baseline
+(what a native alternative like grep/read/find would cost).
+
+Key metrics fields in events:
+- `tokens_baseline`: estimated tokens for native operation
+- `tokens_output`: actual tokens returned by code-context tool
+- `savings_tokens`: `baseline - (input + output)`, capped at 0
+- `baseline_op`: the native operation being replaced (e.g. "read_file", "grep", "ls")
+- `is_estimate`: `true` for events recorded before real token measurement was added
+
+Savings examples by tool (from `get_metrics_daily_trend`):
+```
+smart_read:     baseline=file_line_count×4,  output=result_tokens,        savings_pct ~87%
+semantic_search: baseline=grep+read_estimate, output=chunk_tokens,         savings_pct ~96%
+find_symbols:   baseline=files_scanned×200,  output=symbol_list_tokens,    savings_pct ~99%
+code_search:    baseline=matches×context×4,  output=match_results_tokens, savings_pct ~90%
+compact_change_intelligence: baseline=raw_git_diff, output=compact_json,   savings_pct ~75%
+```
+
+Use `get_metrics_report()` to see real vs estimated savings breakdown for the current session.
+Use `reset_metrics()` to start fresh. All savings data is stored in `~/.code-context-cache/metrics/events.jsonl`.
 
 ---
 

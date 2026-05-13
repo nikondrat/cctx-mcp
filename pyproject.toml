@@ -1,8 +1,22 @@
 [project]
-name = "code-context"
+name = "mcp-code-context"
 version = "0.1.0"
-description = "MCP server for efficient code context retrieval - reduces AI agent token usage by providing structured code summaries instead of full file reads"
+description = "MCP server for AI agents — structured code analysis that cuts token usage by 87%"
+readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["mcp", "mcp-server", "ai-agents", "code-analysis", "tree-sitter", "developer-tools", "llm"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Environment :: Console",
+]
 dependencies = [
     "mcp>=1.0.0",
     "tree-sitter>=0.23.0",
@@ -15,9 +29,14 @@ dependencies = [
     "numpy>=1.26.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/nikondrat/code-context"
+Repository = "https://github.com/nikondrat/code-context"
+Issues = "https://github.com/nikondrat/code-context/issues"
+
 [project.scripts]
-code-context = "code_context.server:main"
-pre-index = "pre_index_cli:main"
+mcp-code-context = "code_context.server:main"
+pre-index = "code_context.pre_index_cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

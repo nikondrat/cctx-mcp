@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from search import ProjectSearch
+from code_context.search import ProjectSearch
 
 
 class TestTraceCalls(unittest.TestCase):

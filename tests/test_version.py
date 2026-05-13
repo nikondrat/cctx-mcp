@@ -4,7 +4,7 @@ import json
 import re
 import unittest
 
-from server import SERVER_VERSION, GIT_COMMIT, BUILD_TIMESTAMP
+from code_context.server import SERVER_VERSION, GIT_COMMIT, BUILD_TIMESTAMP
 
 
 class TestServerVersion(unittest.TestCase):
@@ -19,7 +19,7 @@ class TestServerVersion(unittest.TestCase):
         self.assertRegex(BUILD_TIMESTAMP, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
     def test_get_version_returns_valid_json(self):
-        from server import get_version
+        from code_context.server import get_version
         result = get_version()
         data = json.loads(result)
         self.assertIn("version", data)
@@ -29,6 +29,6 @@ class TestServerVersion(unittest.TestCase):
         self.assertEqual(data["commit"], GIT_COMMIT)
 
     def test_get_version_json_is_parseable(self):
-        from server import get_version
+        from code_context.server import get_version
         data = json.loads(get_version())
         self.assertRegex(data["version"], r"^\d+\.\d+\.\d+$")

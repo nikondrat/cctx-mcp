@@ -68,4 +68,4 @@
 - [x] 8.5 `uv run pytest tests/test_semantic_search_quality.py -v` — 5/5 passed
 - [x] 8.6 `uv run pytest tests/ --tb=short -q` — 93 passed, 3 subtests passed, 0 failed
 - [x] 8.7 Bump SERVER_VERSION до 0.3.0
-- [ ] 8.8 Закоммитить все изменения (3-5 conventional commits)
+- [x] 8.8 Закоммитить все изменения (3 conventional commits: feat(core), feat(tests), chore)

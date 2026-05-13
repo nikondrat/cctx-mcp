@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from llm.contracts import LLMResponse
-from vector_index import VectorIndex, _extract_chunks, _file_hash, Chunk
+from code_context.vector_index import VectorIndex, _extract_chunks, _file_hash, Chunk
 
 
 def _mock_client(dim: int = 8):

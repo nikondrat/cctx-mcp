@@ -2,7 +2,7 @@
 
 import json
 
-from change_intel import (
+from code_context.change_intel import (
     ChangedFile,
     CompactChange,
     CompactChangeIntel,
