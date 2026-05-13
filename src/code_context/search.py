@@ -389,7 +389,7 @@ class ProjectSearch:
     ) -> str:
         """Recursively build directory summary."""
         rel = directory.relative_to(project_root)
-        lines = [f"📁 {rel}/" if rel != Path(".") else f"📁 {project_root.name}/"]
+        lines = [f"{rel}/" if rel != Path(".") else f"{project_root.name}/"]
 
         try:
             entries = sorted(directory.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
@@ -419,7 +419,7 @@ class ProjectSearch:
         for sd in subdirs:
             sd_rel = sd.relative_to(project_root)
             sd_files = sum(1 for _ in self._iter_all_files(sd, max_depth=1))
-            lines.append(f"  📂 {sd.name}/  ({sd_files} source files)")
+            lines.append(f"  {sd.name}/  ({sd_files} source files)")
             if depth > 1:
                 sub_summary = self._build_dir_summary(sd, project_root, depth - 1, prefix + "  ")
                 # Indent sub-summary lines

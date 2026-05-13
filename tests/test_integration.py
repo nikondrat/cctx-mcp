@@ -86,7 +86,7 @@ def test_semantic_search_returns_unavailable_when_providers_down():
     import os
     import tempfile
     from pathlib import Path
-    import server
+    from code_context import handlers
 
     orig_url = os.environ.get("CC_OLLAMA_URL")
     orig_key = os.environ.get("CC_OPENROUTER_API_KEY")
@@ -94,15 +94,15 @@ def test_semantic_search_returns_unavailable_when_providers_down():
         os.environ["CC_OLLAMA_URL"] = "http://127.0.0.1:1"
         if "CC_OPENROUTER_API_KEY" in os.environ:
             del os.environ["CC_OPENROUTER_API_KEY"]
-        server._llm_router = None
-        server._vector_indexes = {}
+        handlers._llm_router = None
+        handlers._vector_indexes = {}
 
         project = Path(tempfile.mkdtemp())
         (project / "test.py").write_text("x = 1\ny = 2\n")
 
-        result = server.semantic_search(query="test", project_path=str(project))
+        result = handlers.tool_semantic_search(query="test", project_path=str(project))
         assert "unavailable" in result.lower() or "error" in result.lower(), f"Expected unavailable/error, got: {result}"
-        assert "решение" in result.lower() or "ollama" in result.lower(), f"Expected actionable message, got: {result}"
+        assert "ollama" in result.lower(), f"Expected actionable message, got: {result}"
     finally:
         if orig_url is not None:
             os.environ["CC_OLLAMA_URL"] = orig_url
@@ -112,14 +112,14 @@ def test_semantic_search_returns_unavailable_when_providers_down():
             os.environ["CC_OPENROUTER_API_KEY"] = orig_key
         else:
             os.environ.pop("CC_OPENROUTER_API_KEY", None)
-        server._llm_router = None
-        server._vector_indexes = {}
+        handlers._llm_router = None
+        handlers._vector_indexes = {}
 
 
 def test_semantic_search_empty_query_returns_message():
-    import server
-    result = server.semantic_search(query="", project_path="/tmp")
+    from code_context.handlers import tool_semantic_search
+    result = tool_semantic_search(query="", project_path="/tmp")
     assert "empty query" in result.lower(), f"Expected empty query message, got: {result}"
-    result = server.semantic_search(query="   ", project_path="/tmp")
+    result = tool_semantic_search(query="   ", project_path="/tmp")
     assert "empty query" in result.lower(), f"Expected empty query message for whitespace, got: {result}"
 

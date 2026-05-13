@@ -23,7 +23,7 @@ QUERIES = [
     ("project search find symbols", ["src/code_context/search.py"]),
     ("git commit change summary", ["AGENTS.md", "src/code_context/change_intel.py"]),
     ("semantic code summaries tool", ["src/code_context/summaries.py", "src/code_context/server.py"]),
-    ("MCP instrumentation decorator", ["src/code_context/server.py"]),
+    ("MCP instrumentation decorator", ["src/code_context/context.py"]),
 ]
 
 

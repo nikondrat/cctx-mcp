@@ -62,8 +62,8 @@ class CompactChange:
     change_types: list[str] = field(default_factory=list)
     intent_cues: list[str] = field(default_factory=list)
 
-    def to_json(self, indent: int = 2) -> str:
-        return json.dumps(asdict(self), indent=indent)
+    def to_json(self) -> str:
+        return json.dumps(asdict(self))
 
 
 @dataclass

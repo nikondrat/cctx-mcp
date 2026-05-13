@@ -416,26 +416,19 @@ class VectorIndex:
 
         k = min(top_k, len(self._chunks))
         top_indices = scores.argsort()[-k:][::-1]
-        max_score = float(max(float(scores[i]) for i in top_indices)) if k > 0 else 0.0
 
-        seen_files: set[str] = set()
         output: list[SearchResult] = []
         for i in top_indices:
             raw_score = float(scores[i])
             if raw_score <= 0:
                 continue
-            file_name = self._chunks[i].file
-            if file_name in seen_files:
-                continue
-            seen_files.add(file_name)
-            normalized = raw_score / max_score if max_score > 0 else raw_score
             output.append(
                 SearchResult(
-                    file=file_name,
+                    file=self._chunks[i].file,
                     line=self._chunks[i].line_start,
                     symbol=self._chunks[i].symbol,
                     snippet=self._chunks[i].snippet,
-                    score=round(float(normalized), 4),
+                    score=round(raw_score, 2),
                 )
             )
 

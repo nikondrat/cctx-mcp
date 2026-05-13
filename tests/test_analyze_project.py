@@ -40,6 +40,6 @@ class TestAnalyzeProject(unittest.TestCase):
             self.assertEqual(stats["languages"]["python"], 3)
 
     def test_nonexistent_path_returns_error(self):
-        from code_context.server import analyze_project
-        result = analyze_project("/nonexistent/project")
+        from code_context.handlers import tool_analyze_project
+        result = tool_analyze_project("/nonexistent/project")
         self.assertIn("Error", result)
