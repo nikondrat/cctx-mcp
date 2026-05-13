@@ -1,5 +1,5 @@
 [project]
-name = "mcp-code-context"
+name = "cctx-mcp"
 version = "0.1.0"
 description = "MCP server for AI agents — structured code analysis that cuts token usage by 87%"
 readme = "README.md"
@@ -30,12 +30,12 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/nikondrat/mcp-code-context"
-Repository = "https://github.com/nikondrat/mcp-code-context"
-Issues = "https://github.com/nikondrat/mcp-code-context/issues"
+Homepage = "https://github.com/nikondrat/cctx-mcp"
+Repository = "https://github.com/nikondrat/cctx-mcp"
+Issues = "https://github.com/nikondrat/cctx-mcp/issues"
 
 [project.scripts]
-mcp-code-context = "code_context.server:main"
+cctx-mcp = "code_context.server:main"
 pre-index = "code_context.pre_index_cli:main"
 
 [build-system]

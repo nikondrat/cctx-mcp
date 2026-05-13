@@ -1,21 +1,21 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/%E2%96%B0%20MCP%20Code%20Context-0F172A?style=for-the-badge&logo=python&logoColor=3B82F6&labelColor=1E293B">
-    <img src="https://img.shields.io/badge/%E2%96%B0%20MCP%20Code%20Context-F1F5F9?style=for-the-badge&logo=python&logoColor=2563EB&labelColor=FFFFFF" alt="MCP Code Context">
+    <source media="(prefers-color-scheme: dark)" srcset="https://img.shields.io/badge/CCTX%E2%80%93MCP-0F172A?style=for-the-badge&logo=python&logoColor=3B82F6&labelColor=1E293B">
+    <img src="https://img.shields.io/badge/CCTX%E2%80%93MCP-F1F5F9?style=for-the-badge&logo=python&logoColor=2563EB&labelColor=FFFFFF" alt="CCTX-MCP">
   </picture>
 </p>
 
 <p align="center">
-  <strong>Cut AI agent token usage by 87%.</strong>
+  <strong>Cut AI agent token usage by 87%.</strong><br>
   Structure-aware code analysis via the <a href="https://modelcontextprotocol.io">Model Context Protocol</a> —
-  returns symbol hierarchies, dependencies, and docs instead of raw file contents.
+  returns symbol trees, dependencies, and docs instead of raw file contents.
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/mcp-code-context/"><img src="https://img.shields.io/pypi/v/mcp-code-context?style=flat-square&logo=pypi&logoColor=white&label=PyPI&labelColor=1E293B&color=3B82F6" alt="PyPI"></a>
-  <a href="https://pypi.org/project/mcp-code-context/"><img src="https://img.shields.io/pypi/pyversions/mcp-code-context?style=flat-square&logo=python&logoColor=white&label=Python&labelColor=1E293B&color=3B82F6" alt="Python"></a>
-  <a href="https://github.com/nikondrat/mcp-code-context"><img src="https://img.shields.io/github/stars/nikondrat/mcp-code-context?style=flat-square&logo=github&logoColor=white&label=Stars&labelColor=1E293B&color=3B82F6" alt="Stars"></a>
-  <a href="https://github.com/nikondrat/mcp-code-context/actions"><img src="https://img.shields.io/github/actions/workflow/status/nikondrat/mcp-code-context/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI&labelColor=1E293B&color=3B82F6" alt="CI"></a>
+  <a href="https://pypi.org/project/cctx-mcp/"><img src="https://img.shields.io/pypi/v/cctx-mcp?style=flat-square&logo=pypi&logoColor=white&label=PyPI&labelColor=1E293B&color=3B82F6" alt="PyPI"></a>
+  <a href="https://pypi.org/project/cctx-mcp/"><img src="https://img.shields.io/pypi/pyversions/cctx-mcp?style=flat-square&logo=python&logoColor=white&label=Python&labelColor=1E293B&color=3B82F6" alt="Python"></a>
+  <a href="https://github.com/nikondrat/cctx-mcp"><img src="https://img.shields.io/github/stars/nikondrat/cctx-mcp?style=flat-square&logo=github&logoColor=white&label=Stars&labelColor=1E293B&color=3B82F6" alt="Stars"></a>
+  <a href="https://github.com/nikondrat/cctx-mcp/actions"><img src="https://img.shields.io/github/actions/workflow/status/nikondrat/cctx-mcp/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI&labelColor=1E293B&color=3B82F6" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-3B82F6?style=flat-square&labelColor=1E293B" alt="License"></a>
   <img src="https://img.shields.io/badge/Status-Beta-3B82F6?style=flat-square&labelColor=1E293B" alt="Beta">
 </p>
@@ -24,16 +24,18 @@
 
 ## Overview
 
-**MCP Code Context** is an [MCP](https://modelcontextprotocol.io) server that gives AI agents a structured view of source code — symbol trees, dependency graphs, documentation comments, and line counts — without reading entire files.
+**CCTX-MCP** — Code ConTeXt via Model Context Protocol. An MCP server that gives AI agents a structured view of source code without reading entire files.
 
 Built for **Claude**, **Cursor**, **OpenCode**, and any MCP-compatible AI coding tool.
 
 <p align="center">
-  <a href="#-quick-start"><code>Get started →</code></a>
-  &nbsp;&nbsp;
-  <a href="#%EF%B8%8F-tools"><code>Browse all tools →</code></a>
-  &nbsp;&nbsp;
-  <a href="#-token-savings"><code>See savings →</code></a>
+  <code>uvx cctx-mcp</code>
+  &nbsp;·&nbsp;
+  <a href="#%EF%B8%8F-tools">Tools</a>
+  &nbsp;·&nbsp;
+  <a href="#-token-savings">Savings</a>
+  &nbsp;·&nbsp;
+  <a href="#-install">Install</a>
 </p>
 
 ---
@@ -41,91 +43,41 @@ Built for **Claude**, **Cursor**, **OpenCode**, and any MCP-compatible AI coding
 ## Quick Start
 
 ```bash
-# One command — no clone, no install
-uvx mcp-code-context
+uvx cctx-mcp
 ```
 
-Add to your MCP client configuration:
+Add to your MCP client config:
 
 ```json
 {
   "mcpServers": {
-    "code-context": {
+    "cctx-mcp": {
       "command": "uvx",
-      "args": ["mcp-code-context"]
+      "args": ["cctx-mcp"]
     }
   }
 }
-```
-
-> Compatible with: Claude Desktop · Cursor · OpenCode · Windsurf · VS Code (Cline/Continue) · any MCP client
-
----
-
-## Installation
-
-Choose your preferred method:
-
-### uvx (zero-config, automatic updates)
-
-```json
-{
-  "mcpServers": {
-    "code-context": {
-      "command": "uvx",
-      "args": ["mcp-code-context"]
-    }
-  }
-}
-```
-
-### pip (versioned releases)
-
-```bash
-pip install mcp-code-context
-```
-
-```json
-{
-  "mcpServers": {
-    "code-context": {
-      "command": "python",
-      "args": ["-m", "code_context.server"]
-    }
-  }
-}
-```
-
-### source (bleeding edge)
-
-```bash
-git clone https://github.com/nikondrat/mcp-code-context.git
-cd code-context
-uv sync
-uv run python -m code_context.server --skip-index
 ```
 
 ---
 
 ## Tools
 
-Every tool replaces an expensive native operation. Together they save **75–99%** per call.
-
 ### Code Analysis
 
-| Tool | What it returns | Replaces | Savings |
-|------|-----------------|----------|---------|
+| Tool | Returns | Replaces | Savings |
+|------|---------|----------|---------|
 | `smart_read` | symbol hierarchy, deps, docs, line counts | `cat` + manual parsing | ~87% |
-| `find_symbols` | symbol locations by name or type across project | `grep -r` + file reads | ~99% |
+| `find_symbols` | symbol locations by name or type | `grep -r` + file reads | ~99% |
 | `get_dependencies` | all imports of a file in one shot | `grep ^import` | ~96% |
 | `trace_calls` | every call site with file + line | `grep` across repo | ~90% |
-| `get_symbol_summaries` | AI-generated semantic descriptions per symbol | reading implementation | ~85% |
+| `get_symbol_summaries` | AI semantic descriptions per symbol | reading implementation | ~85% |
 
-### Search
+### Search & Navigation
 
-| Tool | What it returns | Replaces | Savings |
-|------|-----------------|----------|---------|
-| `analyze_project` | language breakdown, file counts, directory tree | `find` + `wc` | ~98% |
+| Tool | Returns | Replaces | Savings |
+|------|---------|----------|---------|
+| `analyze_project` | language breakdown, file counts, tree | `find` + `wc` | ~98% |
 | `code_search` | regex matches with context lines | `grep` + `cat` | ~90% |
 | `semantic_search` | natural language query over indexed codebase | reading everything | ~96% |
 | `dir_summary` | directory listing with sizes | `ls -la` | ~80% |
@@ -133,32 +85,22 @@ Every tool replaces an expensive native operation. Together they save **75–99%
 
 ### Git & Commits
 
-| Tool | What it returns | Replaces | Savings |
-|------|-----------------|----------|---------|
+| Tool | Returns | Replaces | Savings |
+|------|---------|----------|---------|
 | `compact_change_intelligence` | structured git diff with intent cues | `git diff` + `git status` | ~75% |
 | `draft_commit` | AI-generated conventional commit message | writing from scratch | ~90% |
 | `approve_commit_draft` | executes the commit after review | `git add` + `git commit` | — |
 
 ### Observability
 
-| Tool | What it returns |
-|------|-----------------|
-| `get_config` | all feature flags and routing config |
-| `get_health` | aggregated status of Ollama, embeddings, tree-sitter |
-| `get_metrics_report` | token savings, cache hit rate, latencies |
-| `get_metrics_events` | recent tool-call log |
-| `get_metrics_daily_trend` | day-by-day usage and savings |
-| `get_metrics_slowest` | top-N slowest tools |
-| `get_version` | server version for staleness detection |
+`get_config` · `get_health` · `get_metrics_report` · `get_metrics_events` · `get_metrics_daily_trend` · `get_metrics_slowest` · `get_version`
 
 ---
 
 ## Token Savings
 
-Measured against the cheapest native alternative for each operation:
-
-| Operation | Without code-context | With code-context | Savings |
-|-----------|--------------------:|------------------:|--------:|
+| Operation | Native | With CCTX-MCP | Savings |
+|-----------|-------:|--------------:|--------:|
 | Read 500-line file | ~1,500 tokens | ~200 tokens | **87%** |
 | Find function across project | ~5,000 tokens | ~50 tokens | **99%** |
 | Understand imports | ~800 tokens | ~30 tokens | **96%** |
@@ -166,7 +108,7 @@ Measured against the cheapest native alternative for each operation:
 | Analyze project structure | ~10,000 tokens | ~150 tokens | **98%** |
 | Git change summary | ~3,000 tokens | ~750 tokens | **75%** |
 
-Savings compound with every tool call. In a typical session: **80%+ aggregate savings**.
+Typical session: **80%+ aggregate savings**.
 
 ---
 
@@ -182,36 +124,50 @@ Savings compound with every tool call. In a typical session: **80%+ aggregate sa
   <img src="https://img.shields.io/badge/Dart-0175C2?style=flat-square&logo=dart&logoColor=white" alt="Dart">
 </p>
 
-Parsed via [tree-sitter](https://tree-sitter.github.io/) AST — not regex. Each language gets a dedicated analyzer with complete grammar support.
+Powered by [tree-sitter](https://tree-sitter.github.io/) AST — each language has a dedicated parser.
 
 ---
 
-## Architecture
+## Install
 
-```
-src/code_context/
-├── server.py                # MCP server — 20+ tools
-├── cache.py                 # version-aware disk cache
-├── search.py                # cross-project symbol/file search
-├── config.py                # feature flags (env-based)
-├── metrics.py               # token savings instrumentation
-├── vector_index.py          # semantic search via embeddings
-├── change_intel.py          # git diff intelligence
-├── commit_generator.py      # AI commit drafting
-├── pre_index_cli.py         # CLI for pre-building index
-├── analyzers/               # language AST parsers
-│   ├── base.py              # abstract interface
-│   ├── swift.py · python.py · typescript.py
-│   ├── rust.py · go.py · dart.py
-└── llm/                     # provider abstraction
-    ├── router.py            # local-first → remote fallback
-    ├── contracts.py
-    └── providers/
-        ├── ollama.py
-        └── openrouter.py
+### uvx (recommended)
+
+```json
+{
+  "mcpServers": {
+    "cctx-mcp": {
+      "command": "uvx",
+      "args": ["cctx-mcp"]
+    }
+  }
+}
 ```
 
-Routing policy: `local-first` — Ollama for privacy/latency, OpenRouter for fallback. Configurable via `CC_LLM_ROUTER`.
+### pip
+
+```bash
+pip install cctx-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "cctx-mcp": {
+      "command": "python",
+      "args": ["-m", "code_context.server"]
+    }
+  }
+}
+```
+
+### source
+
+```bash
+git clone https://github.com/nikondrat/cctx-mcp.git
+cd cctx-mcp
+uv sync
+uv run python -m code_context.server --skip-index
+```
 
 ---
 
@@ -231,20 +187,14 @@ Routing policy: `local-first` — Ollama for privacy/latency, OpenRouter for fal
 ## Development
 
 ```bash
-# setup
 uv sync
-
-# test
 uv run pytest tests/ -v
-
-# type check (coming soon)
-# uv run mypy src/
 ```
 
-PRs welcome. See [open issues](https://github.com/nikondrat/mcp-code-context/issues).
+PRs welcome. [Open issues](https://github.com/nikondrat/cctx-mcp/issues).
 
 ---
 
 ## License
 
-MIT — free for any use. No attribution required, but appreciated.
+MIT — free for any use.
