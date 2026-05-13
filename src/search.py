@@ -12,8 +12,10 @@ from analyzers import (
     SwiftAnalyzer,
     TypeScriptAnalyzer,
 )
-from analyzers.base import BaseAnalyzer, FileAnalysis, Symbol
-from cache import Cache
+from analyzers.base import BaseAnalyzer, FileAnalysis, SemanticSummary, Symbol
+from cache import Cache, _file_hash
+from config import CodeContextConfig
+from summaries import SemanticSummarizer
 
 # Language extensions mapping
 LANGUAGE_EXTENSIONS = {
@@ -32,16 +34,33 @@ SKIP_DIRS = frozenset({
     ".git", "node_modules", "Pods", "build", "dist", ".build",
     "__pycache__", "venv", ".venv", ".tox", "target", "DerivedData",
     ".xcodeproj", ".xcworkspace", ".swiftpm",
+    "openspec",
 })
 
 
 class ProjectSearch:
     """Search and analyze files in a project."""
 
-    def __init__(self, project_path: Path, cache: Optional[Cache] = None):
+    def __init__(self, project_path: Path, cache: Optional[Cache] = None, config: Optional[CodeContextConfig] = None):
         self.project_path = project_path.resolve()
         self.cache = cache or Cache()
         self._analyzers: dict[str, BaseAnalyzer] = {}
+        self._summarizer = SemanticSummarizer(self.cache)
+        self._config = config or CodeContextConfig()
+
+    @property
+    def _feature_semantic_summaries(self) -> bool:
+        return self._config.semantic_summaries_enabled
+
+    def summarize_symbols(self, file_path: Path) -> Optional[list[SemanticSummary]]:
+        """Generate semantic summaries for all symbols in a file."""
+        analysis = self._analyze_file(file_path)
+        if not analysis:
+            return None
+        if not self._feature_semantic_summaries:
+            return None
+        fh = _file_hash(file_path)
+        return self._summarizer.summarize_file(analysis, fh)
 
     def get_analyzer(self, file_path: Path) -> Optional[BaseAnalyzer]:
         """Get appropriate analyzer for a file."""
@@ -60,7 +79,10 @@ class ProjectSearch:
         # Try cache first
         cached = self.cache.get(file_path)
         if cached:
-            return cached.compact_output()
+            if self._feature_semantic_summaries:
+                fh = _file_hash(file_path)
+                self._summarizer.summarize_file(cached, fh)
+            return cached.compact_output(include_summaries=self._feature_semantic_summaries)
 
         # Analyze file
         analyzer = self.get_analyzer(file_path)
@@ -71,10 +93,15 @@ class ProjectSearch:
         if not analysis:
             return None
 
+        # Generate summaries if enabled
+        if self._feature_semantic_summaries:
+            fh = _file_hash(file_path)
+            self._summarizer.summarize_file(analysis, fh)
+
         # Cache result
         self.cache.put(file_path, analysis)
 
-        return analysis.compact_output()
+        return analysis.compact_output(include_summaries=self._feature_semantic_summaries)
 
     def find_symbols(self, project_path: Optional[Path] = None, name: Optional[str] = None, symbol_type: Optional[str] = None) -> list[dict]:
         """Find symbols across the project."""

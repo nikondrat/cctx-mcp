@@ -8,15 +8,48 @@ from typing import Optional
 
 from mcp.server.fastmcp import FastMCP
 
-from cache import Cache
+from cache import Cache, _file_hash
+from change_intel import CompactChangeIntel, CommitGate
+from commit_generator import CommitGenerator, CommitGeneratorConfig
+from config import CodeContextConfig
+from metrics import get_metrics
+from ollama_client import OllamaClient
 from search import ProjectSearch
+from summaries import SemanticSummarizer
+from vector_index import VectorIndex
+
+# Commit gate singleton
+_commit_gate: Optional[CommitGate] = None
+
+
+def get_commit_gate() -> CommitGate:
+    global _commit_gate
+    if _commit_gate is None:
+        _commit_gate = CommitGate()
+    return _commit_gate
+
 
 # Create MCP server
 mcp = FastMCP("code-context")
 
-# Global cache and search instances
+# Global cache, search, and vector index instances
 _cache: Optional[Cache] = None
 _searches: dict[str, ProjectSearch] = {}
+_vector_indexes: dict[str, VectorIndex] = {}
+
+
+def _get_config() -> CodeContextConfig:
+    return CodeContextConfig()
+
+
+def _get_vector_index(project_path: str) -> Optional[VectorIndex]:
+    cfg = _get_config()
+    if not cfg.embed_model:
+        return None
+    if project_path not in _vector_indexes:
+        client = OllamaClient(cfg.ollama)
+        _vector_indexes[project_path] = VectorIndex(project_path, client, cfg.embed_model)
+    return _vector_indexes[project_path]
 
 
 def get_cache() -> Cache:
@@ -202,6 +235,49 @@ def analyze_project(project_path: str, max_depth: int = 2) -> str:
 
 
 @mcp.tool()
+def get_symbol_summaries(file_path: str, project_path: Optional[str] = None) -> str:
+    """Get semantic summaries for all symbols in a file.
+
+    Returns summary metadata (purpose, behavior, dependencies, source, confidence)
+    per symbol, generated lazily and cached.
+
+    Args:
+        file_path: Path to the file to summarize
+        project_path: Optional project root for context
+
+    Returns:
+        Structured summary metadata for each symbol
+    """
+    path = Path(file_path)
+    if not path.exists():
+        return f"Error: File not found: {file_path}"
+
+    if project_path:
+        search = get_search(project_path)
+    else:
+        search = ProjectSearch(path.parent, get_cache())
+
+    analysis = search._analyze_file(path)
+    if not analysis:
+        return f"Error: Could not analyze file: {file_path}"
+
+    fh = _file_hash(path)
+    summarizer = SemanticSummarizer(get_cache())
+    summaries = summarizer.summarize_file(analysis, fh)
+    if not summaries:
+        return "No summaries generated."
+
+    output = [f"Semantic summaries for {file_path}:"]
+    for ss in summaries:
+        sd = ss.to_dict()
+        output.append(f"\n  {sd['purpose'][:80]}")
+        output.append(f"    behavior: {sd['behavior'][:120]}")
+        output.append(f"    confidence: {sd['confidence']} ({sd['source']})")
+        output.append(f"    last_updated: {sd['last_updated']}")
+    return "\n".join(output)
+
+
+@mcp.tool()
 def code_search(
     project_path: str,
     pattern: str,
@@ -321,6 +397,194 @@ def dir_summary(
 
     search = get_search(project_path)
     return search.dir_summary(dir_path=dir_path, depth=depth)
+
+
+@mcp.tool()
+def semantic_search(
+    query: str,
+    project_path: str,
+    top_k: int = 5,
+) -> str:
+    """Search codebase by natural language query using embeddings (Ollama).
+
+    Fastest path for "find where X is done" questions — returns relevant code
+    chunks ranked by semantic similarity, not full files.  Requires
+    CC_EMBED_MODEL to be set (default: nomic-embed-text) and Ollama running.
+
+    Args:
+        query: Natural language description of what you're looking for
+        project_path: Path to the project root
+        top_k: Number of results to return (default 5)
+
+    Returns:
+        Ranked list of matching code chunks with file, line, symbol, and snippet
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    index = _get_vector_index(project_path)
+    if index is None:
+        return "semantic_search unavailable: CC_EMBED_MODEL is not set. Use find_symbols or code_search instead."
+
+    try:
+        results = index.search(query, top_k=top_k)
+    except Exception as exc:
+        return f"semantic_search error (Ollama unavailable?): {exc}"
+
+    if not results:
+        return "No results found. Try re-indexing or using find_symbols."
+
+    lines = [f"Top {len(results)} results for: {query!r}\n"]
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r.file}:{r.line}  [{r.symbol}]  score={r.score}")
+        lines.append(f"   {r.snippet[:120].replace(chr(10), ' ')}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_config() -> str:
+    """Show current feature flag configuration."""
+    cfg = _get_config()
+    lines = ["Current configuration:"]
+    for k, v in cfg.as_dict().items():
+        lines.append(f"  {k}: {v}")
+    lines.append("")
+    lines.append("Env vars: CC_SEMANTIC_SUMMARIES, CC_COMMIT_DRAFTING,")
+    lines.append("          CC_COMMIT_MODEL, CC_EMBED_MODEL, CC_OLLAMA_URL, CC_OLLAMA_TIMEOUT")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def get_metrics_report() -> str:
+    """Show operational metrics (cache hit rate, latencies, etc.)."""
+    return get_metrics().report()
+
+
+@mcp.tool()
+def compact_change_intelligence(
+    project_path: str,
+    staged: bool = False,
+    unstaged: bool = True,
+    respect_hygiene: bool = True,
+) -> str:
+    """Get compact, structured summary of git changes.
+
+    Produces a low-token change intelligence payload suitable for downstream
+    commit drafting. Applies repository hygiene filters by default to exclude
+    noise paths (build artifacts, lock files, vendored deps, binaries, etc.).
+
+    Args:
+        project_path: Path to the git repository
+        staged: Include staged changes
+        unstaged: Include unstaged changes (default True)
+        respect_hygiene: Filter out noise paths (default True)
+
+    Returns:
+        Compact JSON with changed files, change types, and intent cues
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    intel = CompactChangeIntel(path)
+    cc = intel.summarize_working_changes(staged=staged, unstaged=unstaged, respect_hygiene=respect_hygiene)
+
+    if cc.change_count == 0:
+        return "No changes detected."
+
+    return cc.to_json()
+
+
+@mcp.tool()
+def draft_commit(project_path: str) -> str:
+    """Generate a local commit draft from working tree changes.
+
+    Produces candidate commit message + rationale + confidence score.
+    Final commit requires explicit approval via approve_commit_draft.
+
+    Args:
+        project_path: Path to the git repository
+
+    Returns:
+        Draft commit with message, rationale, and confidence
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    intel = CompactChangeIntel(path)
+    cc = intel.summarize_working_changes()
+
+    if cc.change_count == 0:
+        return "No changes to commit."
+
+    cfg = _get_config()
+    generator = CommitGenerator(CommitGeneratorConfig(model=cfg.commit_model, ollama=cfg.ollama))
+    draft = generator.generate(cc)
+
+    gate = get_commit_gate()
+    gate.reject()  # reset gate for new draft
+
+    return (
+        f"Draft commit message:\n{draft.message}\n\n"
+        f"Rationale: {draft.rationale}\n"
+        f"Confidence: {draft.confidence}\n"
+        f"Source: {draft.source}\n\n"
+        "Use approve_commit_draft to approve or provide an edited message."
+    )
+
+
+@mcp.tool()
+def approve_commit_draft(project_path: str, message: Optional[str] = None) -> str:
+    """Approve or edit the pending commit draft and execute the commit.
+
+    Args:
+        project_path: Path to the git repository
+        message: Optional edited message. If omitted, the draft message is used as-is.
+
+    Returns:
+        Commit result or gate status
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    gate = get_commit_gate()
+    if gate.state == CommitGate.PENDING:
+        return "No pending draft. Run draft_commit first."
+
+    gate.approve(message)
+    result = _execute_commit(path)
+    return result
+
+
+def _execute_commit(repo_path: Path) -> str:
+    import subprocess
+
+    gate = get_commit_gate()
+    if not gate.can_commit:
+        return "Commit not approved."
+
+    msg = gate._approved_message or "(no message)"
+    try:
+        with open(repo_path / ".git/COMMIT_EDITMSG", "w") as f:
+            f.write(msg)
+        result = subprocess.run(
+            ["git", "commit", "--file", ".git/COMMIT_EDITMSG"],
+            capture_output=True,
+            text=True,
+            cwd=repo_path,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            gate.reject()  # reset for next cycle
+            return f"Commit successful:\n{result.stdout}"
+        else:
+            return f"Commit failed:\n{result.stderr}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def main():

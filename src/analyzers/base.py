@@ -2,6 +2,7 @@
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -9,8 +10,31 @@ import tree_sitter as ts
 
 
 @dataclass
+class SemanticSummary:
+    """Semantic summary for a symbol — purpose, behavior, and provenance metadata."""
+    summary_text: str
+    purpose: str
+    behavior: str
+    dependencies: list[str] = field(default_factory=list)
+    source: str = "heuristic"  # doc, heuristic, model
+    confidence: float = 0.0
+    last_updated: Optional[str] = None  # ISO-8601
+
+    def to_dict(self) -> dict:
+        return {
+            "summary_text": self.summary_text,
+            "purpose": self.purpose,
+            "behavior": self.behavior,
+            "dependencies": self.dependencies,
+            "source": self.source,
+            "confidence": self.confidence,
+            "last_updated": self.last_updated or datetime.utcnow().isoformat() + "Z",
+        }
+
+
+@dataclass
 class Symbol:
-    """Represents a code symbol (function, class, etc.)."""
+    """Represents a code symbol (function, class, etc)."""
     name: str
     type: str  # function, class, method, interface, struct, etc.
     start_line: int
@@ -19,6 +43,7 @@ class Symbol:
     parameters: Optional[str] = None
     return_type: Optional[str] = None
     children: list["Symbol"] = field(default_factory=list)
+    semantic_summary: Optional[SemanticSummary] = None
 
     @property
     def line_count(self) -> int:
@@ -49,7 +74,7 @@ class FileAnalysis:
     dependencies: list[str]  # Other files/modules this depends on
     summary: str = ""
 
-    def compact_output(self, max_symbols: int = 50) -> str:
+    def compact_output(self, max_symbols: int = 50, include_summaries: bool = False) -> str:
         """Generate compact output for AI agents."""
         lines = [
             f"File: {self.file_path}",
@@ -70,9 +95,15 @@ class FileAnalysis:
         lines.append("--- Structure ---")
         for sym in self.symbols[:max_symbols]:
             indent = "  " * _indent_level(sym)
-            lines.append(f"{indent}├── {sym.summary()}")
+            sym_line = sym.summary()
+            lines.append(f"{indent}├── {sym_line}")
+            if include_summaries and sym.semantic_summary:
+                lines.append(f"{indent}│   └── {sym.semantic_summary.summary_text[:100]}")
             for child in sym.children[:10]:
-                lines.append(f"{indent}│   ├── {child.summary()}")
+                child_line = child.summary()
+                lines.append(f"{indent}│   ├── {child_line}")
+                if include_summaries and child.semantic_summary:
+                    lines.append(f"{indent}│   │   └── {child.semantic_summary.summary_text[:80]}")
             if len(sym.children) > 10:
                 lines.append(f"{indent}│   └── ... +{len(sym.children) - 10} more")
 
