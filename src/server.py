@@ -5,6 +5,7 @@ import functools
 import os
 import sys
 import time
+from datetime import date
 from pathlib import Path
 from typing import Any, Optional
 
@@ -545,6 +546,89 @@ def get_metrics_events(limit: int = 25) -> str:
         lines.append(
             f"  ts={event.get('ts')} tool={event.get('tool')} latency_ms={event.get('latency_ms')} status={status}"
         )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+@_instrument_tool("get_metrics_slowest")
+def get_metrics_slowest(limit: int = 5) -> str:
+    """Show the N slowest MCP tools by average latency.
+
+    Args:
+        limit: Number of tools to return (default 5)
+
+    Returns:
+        Formatted list of slowest tools with call count, latency, and errors
+    """
+    metrics = get_metrics()
+    tools = metrics.slowest(limit=limit)
+    if not tools:
+        return "No tool metrics recorded yet."
+
+    lines = [f"Top {len(tools)} slowest tools:"]
+    for t in tools:
+        lines.append(
+            f"  {t['tool']}: {t['calls']} calls, "
+            f"avg {t['avg_latency_ms']}ms, "
+            f"total {t['total_latency_ms']}ms, "
+            f"errors {t['errors']}"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+@_instrument_tool("get_metrics_errors")
+def get_metrics_errors() -> str:
+    """Show tools with recorded errors and overall error rate.
+
+    Returns:
+        Formatted error summary per tool and total error rate
+    """
+    metrics = get_metrics()
+    summary = metrics.errors_summary()
+    if not summary["tools_with_errors"]:
+        return "No errors recorded across any tool."
+
+    lines = [f"Error summary ({summary['total_errors']}/{summary['total_calls']} calls, {summary['error_rate']:.2%}):"]
+    for t in summary["tools_with_errors"]:
+        lines.append(f"  {t['tool']}: {t['errors']} errors / {t['calls']} calls")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+@_instrument_tool("get_metrics_daily_trend")
+def get_metrics_daily_trend(days: int = 7) -> str:
+    """Show daily snapshot trend for the last N days, with token savings estimates.
+
+    Triggers today's snapshot on first call of the day.
+
+    Args:
+        days: Number of days to show (default 7)
+
+    Returns:
+        Formatted daily trend with per-tool stats and estimated token savings
+    """
+    metrics = get_metrics()
+
+    today = date.today().isoformat()
+    today_file = metrics._daily_dir / f"{today}.json"
+    if not today_file.exists():
+        metrics._daily_snapshot()
+
+    trend = metrics.get_daily_trend(days=days)
+    lines = [f"Daily trend (last {len(trend)} days):\n"]
+    for entry in trend:
+        d = entry["date"]
+        tools = entry.get("tools", {})
+        savings = entry.get("total_savings_estimate_tokens", 0)
+        if not tools:
+            lines.append(f"  {d}: no data")
+            continue
+        lines.append(f"  {d}: {len(tools)} tools, ~{savings:,} tokens saved")
+        for tname, tstats in sorted(tools.items()):
+            lines.append(f"    {tname}: {tstats['calls']} calls, {tstats.get('avg_latency_ms', 0)}ms avg, "
+                         f"{tstats['errors']} errors, ~{tstats.get('est_saved_tokens', 0):,} tokens saved")
+        lines.append("")
     return "\n".join(lines)
 
 

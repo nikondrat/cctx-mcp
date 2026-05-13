@@ -3,10 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections import defaultdict
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+
+
+TOOL_SAVINGS_FACTOR: dict[str, float] = {
+    "smart_read": 0.87,
+    "find_symbols": 0.99,
+    "semantic_search": 0.96,
+    "get_dependencies": 0.96,
+    "trace_calls": 0.90,
+    "compact_change_intelligence": 0.75,
+    "analyze_project": 0.85,
+    "code_search": 0.90,
+    "find_files": 0.80,
+    "dir_summary": 0.80,
+}
 
 
 class Metrics:
@@ -125,6 +141,127 @@ class Metrics:
         if not hints:
             hints.append("No obvious usage anti-patterns detected.")
         return hints
+
+    # ── slowest tools ────────────────────────────────────────────────────
+
+    def slowest(self, limit: int = 5) -> list[dict]:
+        tools = []
+        for name, count in self._calls.items():
+            total_latency = self._call_latency_ms.get(name, 0)
+            errors = self._call_errors.get(name, 0)
+            avg_latency = round(total_latency / count, 1) if count else 0.0
+            tools.append({
+                "tool": name,
+                "calls": count,
+                "total_latency_ms": total_latency,
+                "avg_latency_ms": avg_latency,
+                "errors": errors,
+            })
+        tools.sort(key=lambda t: t["avg_latency_ms"], reverse=True)
+        return tools[:limit]
+
+    def errors_summary(self) -> dict:
+        tools_with_errors = []
+        total_calls = 0
+        total_errors = 0
+        for name, count in self._calls.items():
+            errs = self._call_errors.get(name, 0)
+            total_calls += count
+            total_errors += errs
+            if errs > 0:
+                tools_with_errors.append({
+                    "tool": name,
+                    "calls": count,
+                    "errors": errs,
+                })
+        error_rate = round(total_errors / total_calls, 4) if total_calls else 0.0
+        return {
+            "tools_with_errors": tools_with_errors,
+            "total_calls": total_calls,
+            "total_errors": total_errors,
+            "error_rate": error_rate,
+        }
+
+    @staticmethod
+    def _savings_estimate(tool_name: str, calls: int) -> int:
+        factor = TOOL_SAVINGS_FACTOR.get(tool_name, 0.50)
+        avg_file_size_tokens = 1500
+        return int(calls * avg_file_size_tokens * factor)
+
+    # ── daily snapshot ───────────────────────────────────────────────────
+
+    @property
+    def _daily_dir(self) -> Path:
+        p = self._events_path.parent / "daily"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    def _daily_snapshot(self) -> dict:
+        today = date.today().isoformat()
+        today_ts_start = int(datetime.strptime(today, "%Y-%m-%d").timestamp())
+
+        tools: dict[str, dict] = {}
+        if self._events_path.exists():
+            try:
+                for line in self._events_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("ts", 0) < today_ts_start:
+                        continue
+                    tool_name = event.get("tool", "unknown")
+                    if tool_name not in tools:
+                        tools[tool_name] = {"calls": 0, "total_latency_ms": 0, "errors": 0}
+                    tools[tool_name]["calls"] += 1
+                    tools[tool_name]["total_latency_ms"] += event.get("latency_ms", 0)
+                    if not event.get("ok", True):
+                        tools[tool_name]["errors"] += 1
+            except OSError:
+                pass
+
+        total_savings = 0
+        for tname, tstats in tools.items():
+            tstats["avg_latency_ms"] = round(tstats["total_latency_ms"] / tstats["calls"], 1) if tstats["calls"] else 0.0
+            savings = self._savings_estimate(tname, tstats["calls"])
+            tstats["est_saved_tokens"] = savings
+            total_savings += savings
+            del tstats["total_latency_ms"]
+
+        snapshot = {
+            "date": today,
+            "tools": tools,
+            "total_savings_estimate_tokens": total_savings,
+        }
+
+        daily_file = self._daily_dir / f"{today}.json"
+        tmp = daily_file.with_suffix(".tmp")
+        try:
+            tmp.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+            os.replace(str(tmp), str(daily_file))
+        except OSError:
+            pass
+
+        return snapshot
+
+    def get_daily_trend(self, days: int = 7) -> list[dict]:
+        today = date.today()
+        results = []
+        for i in range(days):
+            day = date.fromordinal(today.toordinal() - i)
+            daily_file = self._daily_dir / f"{day.isoformat()}.json"
+            if daily_file.exists():
+                try:
+                    data = json.loads(daily_file.read_text(encoding="utf-8"))
+                    results.append(data)
+                except (OSError, json.JSONDecodeError):
+                    results.append({"date": day.isoformat(), "error": "corrupt file"})
+            else:
+                results.append({"date": day.isoformat(), "tools": {}, "total_savings_estimate_tokens": 0})
+        return results
 
     # ── report ───────────────────────────────────────────────────────────
 

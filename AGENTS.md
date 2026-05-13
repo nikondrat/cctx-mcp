@@ -33,7 +33,7 @@ Need to understand code?
 ├── Understand imports → get_dependencies
 └── Browse directory → dir_summary
 
-Need to commit?
+Need to commit?  ⚠️ ABSOLUTE REQUIREMENT — see "Commit Flow" section below
 ├── Understand what changed → compact_change_intelligence
 ├── Generate message → draft_commit
 └── Execute commit → approve_commit_draft
@@ -117,15 +117,43 @@ code_search(project_path="/project", pattern="TODO|FIXME", file_pattern="*.py")
 
 ---
 
-## Commit Flow (always use this sequence)
+## Commit Flow — ABSOLUTE REQUIREMENT
+
+<EXTREMELY-IMPORTANT>
+Running native git commands (`git diff`, `git status`, `git log`, `git commit`) for commit-related tasks is strictly prohibited. It wastes 75%+ tokens per operation and bypasses the commit drafting gate.
+
+You MUST use the code-context MCP commit flow for ALL commit operations:
 
 ```
-1. compact_change_intelligence(project_path)   → understand what changed
-2. draft_commit(project_path)                  → generate candidate message (local-first router)
+1. compact_change_intelligence(project_path)   → structured diff + intent cues
+2. draft_commit(project_path)                  → AI-generated candidate message
 3. approve_commit_draft(project_path, message?) → execute git commit
 ```
 
-Never run `git commit` directly. The gate ensures message quality and prevents accidental commits.
+You MUST NOT use: `git diff`, `git status`, `git log`, `git add`, `git commit`, or any other native git command for commit operations.
+
+There are zero exceptions. This is not negotiable.
+</EXTREMELY-IMPORTANT>
+
+### Fallback — MCP Server Unavailable
+
+If `compact_change_intelligence` or `draft_commit` returns an error (e.g., MCP server unavailable), use `approve_commit_draft(project_path, message='...')` with a manually written conventional commit message. NEVER fall back to bash `git commit`.
+
+### Red Flags — Commit Rationalization
+
+If you catch yourself thinking any of these, STOP — you are rationalizing:
+
+| Thought | Reality |
+|---------|---------|
+| "I'll just run `git diff` to see what changed" | Use `compact_change_intelligence` — structured output, 75% fewer tokens |
+| "Let me check `git status` real quick" | `compact_change_intelligence` includes status + diff in one call |
+| "I'll just commit directly, it's a simple change" | Always use the 3-step commit flow. Drafting catches message quality issues. |
+| "I'm only looking at git log for context" | `compact_change_intelligence` already includes recent history |
+| "The MCP tool might not work on this project" | It works. This is rationalization. Use the tool. |
+| "This doesn't need a formal commit flow" | Every commit does. The gate prevents accidental commits. |
+| "Let me git add && git commit quickly" | Even staging should go through the MCP tools. Always. |
+| "I need to see the raw diff, the tool strips data" | `compact_change_intelligence` is lossless — full diff + structured metadata |
+| "The MCP tool returned an error, I'll just git commit directly" | Use the fallback: `approve_commit_draft(project_path, message='...')` with a manual message. NEVER fall back to bash `git commit`. |
 
 ---
 
