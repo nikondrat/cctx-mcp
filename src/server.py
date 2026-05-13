@@ -2,14 +2,30 @@
 
 import asyncio
 import functools
+import json
 import os
+import subprocess
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
 from mcp.server.fastmcp import FastMCP
+
+
+SERVER_VERSION = "0.2.0"
+
+try:
+    _commit = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, timeout=5,
+    )
+    GIT_COMMIT = _commit.stdout.strip() or "unknown"
+except Exception:
+    GIT_COMMIT = "unknown"
+
+BUILD_TIMESTAMP = datetime.now().isoformat()
 
 from cache import Cache, _file_hash
 from change_intel import CompactChangeIntel, CommitGate
@@ -522,6 +538,17 @@ def get_config() -> str:
     lines.append("          CC_OPENROUTER_EMBED_MODEL, CC_OPENROUTER_COMMIT_MODEL,")
     lines.append("          CC_OPENROUTER_MAX_TOKENS, CC_OPENROUTER_TEMPERATURE")
     return "\n".join(lines)
+
+
+@mcp.tool()
+@_instrument_tool("get_version")
+def get_version() -> str:
+    """Show server version, git commit, and build timestamp for staleness detection."""
+    return json.dumps({
+        "version": SERVER_VERSION,
+        "commit": GIT_COMMIT,
+        "built": BUILD_TIMESTAMP,
+    })
 
 
 @mcp.tool()

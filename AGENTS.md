@@ -117,6 +117,33 @@ code_search(project_path="/project", pattern="TODO|FIXME", file_pattern="*.py")
 
 ---
 
+## Server Version Protocol
+
+After editing any source file in `src/`, the MCP server running in memory becomes stale. The server MUST be restarted for changes to take effect.
+
+### Version Bump Policy
+
+After every source edit, bump the `SERVER_VERSION` constant in `server.py`:
+- **PATCH** (0.1.0 → 0.1.1): bug fixes
+- **MINOR** (0.1.0 → 0.2.0): new features, tools
+- **MAJOR** (1.0.0 → 2.0.0): breaking changes
+
+### Staleness Detection Flow
+
+```
+1. Edit source code → bump SERVER_VERSION
+2. Call get_version()
+3. Compare returned version with expected version
+   ├── Match → server is up to date ✓
+   └── Mismatch → server is stale!
+        → "Server is running stale code (vX.Y.Z, expected vA.B.C).
+           Please restart opencode to pick up changes."
+```
+
+You MUST call `get_version()` after bumping and check for staleness. If the server is stale, do NOT continue using tools — prompt the user to restart.
+
+---
+
 ## Commit Flow — ABSOLUTE REQUIREMENT
 
 <EXTREMELY-IMPORTANT>
@@ -154,6 +181,7 @@ If you catch yourself thinking any of these, STOP — you are rationalizing:
 | "Let me git add && git commit quickly" | Even staging should go through the MCP tools. Always. |
 | "I need to see the raw diff, the tool strips data" | `compact_change_intelligence` is lossless — full diff + structured metadata |
 | "The MCP tool returned an error, I'll just git commit directly" | Use the fallback: `approve_commit_draft(project_path, message='...')` with a manual message. NEVER fall back to bash `git commit`. |
+| "I just fixed the code, the server will pick it up" | The running server still has old code. Bump `SERVER_VERSION` and call `get_version()` to verify. |
 
 ---
 
