@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.error
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -14,7 +16,7 @@ from typing import Any, Optional
 from mcp.server.fastmcp import FastMCP
 
 
-SERVER_VERSION = "0.2.0"
+SERVER_VERSION = "0.3.0"
 
 try:
     _commit = subprocess.run(
@@ -498,6 +500,9 @@ def semantic_search(
     Returns:
         Ranked list of matching code chunks with file, line, symbol, and snippet
     """
+    if not query or not query.strip():
+        return "semantic_search: empty query. Укажите непустой поисковый запрос."
+
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
@@ -506,10 +511,23 @@ def semantic_search(
     if index is None:
         return "semantic_search unavailable: no embedding model configured. Use find_symbols or code_search instead."
 
+    index.clear_error()
     try:
         results = index.search(query, top_k=top_k)
     except Exception as exc:
         return f"semantic_search error: {exc}"
+
+    if index.last_error:
+        err = index.last_error
+        if "ollama" in err.lower() or "provider" in err.lower():
+            return (
+                "semantic_search временно недоступен.\n"
+                f"  Причина: {err}\n"
+                "  Решение: убедитесь что Ollama запущен (ollama serve) "
+                "и модель nomic-embed-text установлена (ollama pull nomic-embed-text).\n"
+                "  Альтернатива: используйте find_symbols или code_search."
+            )
+        return f"semantic_search error: {err}"
 
     if not results:
         return "No results found. Try re-indexing or using find_symbols."
@@ -549,6 +567,89 @@ def get_version() -> str:
         "commit": GIT_COMMIT,
         "built": BUILD_TIMESTAMP,
     })
+
+
+@mcp.tool()
+@_instrument_tool("get_health")
+def get_health() -> str:
+    """Show aggregated health status of all system dependencies.
+
+    Returns:
+        JSON with status for ollama, vector_index, tree_sitter, and server.
+    """
+    cfg = _get_config()
+    report: dict[str, Any] = {
+        "server": {
+            "version": SERVER_VERSION,
+            "commit": GIT_COMMIT,
+        },
+    }
+
+    # Ollama check
+    ollama_status: dict[str, Any] = {}
+    try:
+        req = urllib.request.Request(
+            f"{cfg.ollama.base_url}/api/tags",
+            method="GET",
+        )
+        started = time.perf_counter()
+        with urllib.request.urlopen(req, timeout=2) as resp:
+            lat = int((time.perf_counter() - started) * 1000)
+            data = json.loads(resp.read())
+            models = [m["name"] for m in data.get("models", [])]
+            ollama_status = {
+                "status": "ok",
+                "latency_ms": lat,
+                "models": models,
+            }
+    except (urllib.error.URLError, ConnectionError, OSError) as e:
+        ollama_status = {
+            "status": "error",
+            "error": f"Ollama не запущен: {e}",
+            "fix": "Запусти: ollama serve",
+        }
+
+    report["ollama"] = ollama_status
+
+    # Embedding model check
+    emb_model = cfg.embed_model
+    if ollama_status.get("status") == "ok":
+        emb_found = any(emb_model in m or m.startswith(emb_model) for m in ollama_status.get("models", []))
+        if emb_found:
+            report["embedding_model"] = {"status": "ok", "model": emb_model}
+        else:
+            report["embedding_model"] = {
+                "status": "error",
+                "model": emb_model,
+                "error": f"Модель '{emb_model}' не найдена в Ollama",
+                "fix": f"Запусти: ollama pull {emb_model}",
+            }
+    else:
+        report["embedding_model"] = {"status": "unknown", "model": emb_model}
+
+    # Vector index check
+    vi_status: dict[str, Any] = {"status": "not_built"}
+    if _vector_indexes:
+        for proj, idx in _vector_indexes.items():
+            if idx._chunks:
+                vi_status = {
+                    "status": "ok",
+                    "chunks": len(idx._chunks),
+                    "project": proj,
+                }
+                break
+    report["vector_index"] = vi_status
+
+    # Tree-sitter check
+    try:
+        import importlib
+        ts = importlib.import_module("tree_sitter")
+        ts_ver = getattr(ts, "__version__", "installed")
+        report["tree_sitter"] = {"status": "ok", "version": str(ts_ver)}
+    except ImportError:
+        report["tree_sitter"] = {"status": "error", "error": "tree_sitter не установлен"}
+
+    return json.dumps(report, indent=2)
 
 
 @mcp.tool()
@@ -805,13 +906,54 @@ def _execute_commit(repo_path: Path) -> str:
 
 
 def main():
-    """Run the MCP server."""
+    """Run the MCP server with optional pre-indexing."""
+    import argparse
     import os
+    import threading
 
-    # Add src to path
     src_path = Path(__file__).parent
     if str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
+
+    parser = argparse.ArgumentParser(description="code-context MCP server")
+    parser.add_argument("--skip-index", action="store_true", help="Skip vector index pre-build on startup")
+    parser.add_argument("--project", type=str, default=None, help="Project path for pre-indexing")
+    args, _ = parser.parse_known_args()
+
+    if not args.skip_index:
+        project_path = args.project or os.environ.get("CC_PROJECT_PATH") or os.getcwd()
+        p = Path(project_path)
+        if p.exists():
+            print(f"Pre-building vector index for {project_path}...", file=sys.stderr)
+            try:
+                cfg = _get_config()
+                router = _get_llm_router()
+                from vector_index import VectorIndex
+                idx = VectorIndex(
+                    project_path,
+                    router,
+                    local_model=cfg.embed_model,
+                    remote_model=cfg.openrouter_embed_model,
+                )
+                done = threading.Event()
+
+                def _build():
+                    try:
+                        idx.index_project()
+                        _vector_indexes[project_path] = idx
+                    except Exception as e:
+                        print(f"Index build error (will use lazy): {e}", file=sys.stderr)
+                    finally:
+                        done.set()
+
+                t = threading.Thread(target=_build, daemon=True)
+                t.start()
+                if not done.wait(timeout=30):
+                    print("Index build timed out (30s), continuing with lazy index", file=sys.stderr)
+                else:
+                    print(f"Index built: {len(idx._chunks)} chunks from {project_path}", file=sys.stderr)
+            except Exception as e:
+                print(f"Index pre-build skipped: {e}", file=sys.stderr)
 
     mcp.run()
 

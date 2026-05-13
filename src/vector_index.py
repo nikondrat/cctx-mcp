@@ -101,8 +101,15 @@ def _iter_source_files(project_path: Path):
             yield path
 
 
+_CLASS_KEYWORDS = {"class", "struct", "enum", "protocol", "interface", "trait"}
+
+
+def _is_class_keyword(kw: str) -> bool:
+    return kw.rstrip(":") in _CLASS_KEYWORDS
+
+
 def _extract_chunks(file_path: Path, project_path: Path) -> list[Chunk]:
-    """Read file and produce one Chunk per top-level symbol (or whole file if tiny)."""
+    """Read file and produce one Chunk per definition (including nested methods)."""
     try:
         text = file_path.read_text(errors="replace")
     except OSError:
@@ -112,68 +119,50 @@ def _extract_chunks(file_path: Path, project_path: Path) -> list[Chunk]:
     rel = str(file_path.relative_to(project_path))
     lines = text.splitlines()
 
-    # Try to chunk by top-level definitions (simple heuristic, no tree-sitter here
-    # to keep this module dependency-free — tree-sitter is used in search.py already)
+    import re
+
+    _def_re = re.compile(r"^(\s*)(def |class |func |fn |function |pub fn |public |private |@interface |struct |enum |trait )\s*(\w+)")
+    _md_heading_re = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
+
+    if file_path.suffix.lower() in {".md", ".markdown", ".mdx"}:
+        return _chunk_markdown(lines, rel, fhash)
+
     chunks: list[Chunk] = []
     current_symbol = "<module>"
     current_start = 1
     buffer: list[str] = []
+    parent_symbol: str = ""
+    parent_indent: int = -1
 
     def _flush(symbol: str, start: int, buf: list[str]) -> None:
         snippet = "\n".join(buf).strip()[:_MAX_SNIPPET_CHARS]
         if not snippet:
             return
-        cid = hashlib.md5(f"{rel}:{start}:{symbol}".encode()).hexdigest()[:12]
-        chunks.append(Chunk(chunk_id=cid, file=rel, line_start=start, symbol=symbol, snippet=snippet, file_hash=fhash))
-
-    import re
-
-    _def_re = re.compile(r"^(def |class |func |fn |function |pub fn |public |private |@interface |struct |enum )\s*(\w+)")
-    _md_heading_re = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
-
-    if file_path.suffix.lower() in {".md", ".markdown", ".mdx"}:
-        chunks = []
-        heading = "<document>"
-        start = 1
-        buf: list[str] = []
-
-        def _flush_md(title: str, line_start: int, lines_buf: list[str]) -> None:
-            snippet = "\n".join(lines_buf).strip()[:_MAX_SNIPPET_CHARS]
-            if not snippet:
-                return
-            cid = hashlib.md5(f"{rel}:{line_start}:{title}".encode()).hexdigest()[:12]
-            chunks.append(
-                Chunk(
-                    chunk_id=cid,
-                    file=rel,
-                    line_start=line_start,
-                    symbol=title,
-                    snippet=snippet,
-                    file_hash=fhash,
-                )
-            )
-
-        for i, line in enumerate(lines, 1):
-            m = _md_heading_re.match(line)
-            if m:
-                if buf:
-                    _flush_md(heading, start, buf)
-                heading = m.group(1).strip() or "<section>"
-                start = i
-                buf = [line]
-            else:
-                buf.append(line)
-
-        _flush_md(heading, start, buf)
-        if chunks:
-            return chunks
+        full_symbol = f"{parent_symbol}.{symbol}" if parent_symbol else symbol
+        cid = hashlib.md5(f"{rel}:{start}:{full_symbol}".encode()).hexdigest()[:12]
+        chunks.append(Chunk(chunk_id=cid, file=rel, line_start=start, symbol=full_symbol, snippet=snippet, file_hash=fhash))
 
     for i, line in enumerate(lines, 1):
-        m = _def_re.match(line.lstrip())
+        m = _def_re.match(line)
         if m:
+            indent = len(m.group(1))
+            keyword = m.group(2).strip()
+            name = m.group(3)
+
             if buffer:
                 _flush(current_symbol, current_start, buffer)
-            current_symbol = m.group(2)
+
+            # Track parent for nested methods
+            if _is_class_keyword(keyword) and indent == 0:
+                parent_symbol = name
+                parent_indent = 0
+            elif indent > 0 and parent_symbol and indent > parent_indent:
+                pass  # method inside a class, parent_symbol already set
+            elif indent == 0 and parent_symbol:
+                parent_symbol = ""
+                parent_indent = -1
+
+            current_symbol = name
             current_start = i
             buffer = [line]
         else:
@@ -181,11 +170,61 @@ def _extract_chunks(file_path: Path, project_path: Path) -> list[Chunk]:
 
     _flush(current_symbol, current_start, buffer)
 
+    # Deduplicate by snippet content (first 100 chars)
+    seen_snippets: set[str] = set()
+    deduped: list[Chunk] = []
+    for c in chunks:
+        key = c.snippet[:100]
+        if key not in seen_snippets:
+            seen_snippets.add(key)
+            deduped.append(c)
+    chunks = deduped
+
     # If file is tiny and produced no chunks, emit one whole-file chunk
     if not chunks and text.strip():
         cid = hashlib.md5(f"{rel}:1:file".encode()).hexdigest()[:12]
         chunks.append(Chunk(chunk_id=cid, file=rel, line_start=1, symbol=rel, snippet=text[:_MAX_SNIPPET_CHARS], file_hash=fhash))
 
+    return chunks
+
+
+def _chunk_markdown(lines: list[str], rel: str, fhash: str) -> list[Chunk]:
+    import re
+    _md_heading_re = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
+
+    chunks: list[Chunk] = []
+    heading = "<document>"
+    start = 1
+    buf: list[str] = []
+
+    def _flush_md(title: str, line_start: int, lines_buf: list[str]) -> None:
+        snippet = "\n".join(lines_buf).strip()[:_MAX_SNIPPET_CHARS]
+        if not snippet:
+            return
+        cid = hashlib.md5(f"{rel}:{line_start}:{title}".encode()).hexdigest()[:12]
+        chunks.append(
+            Chunk(
+                chunk_id=cid,
+                file=rel,
+                line_start=line_start,
+                symbol=title,
+                snippet=snippet,
+                file_hash=fhash,
+            )
+        )
+
+    for i, line in enumerate(lines, 1):
+        m = _md_heading_re.match(line)
+        if m:
+            if buf:
+                _flush_md(heading, start, buf)
+            heading = m.group(1).strip() or "<section>"
+            start = i
+            buf = [line]
+        else:
+            buf.append(line)
+
+    _flush_md(heading, start, buf)
     return chunks
 
 
@@ -214,8 +253,26 @@ class VectorIndex:
         self._vectors: Optional["np.ndarray"] = None  # type: ignore[name-defined]
         self._meta: Optional[IndexMetadata] = None
         self._loaded = False
+        self._last_error: Optional[str] = None
+        self._file_mtimes: dict[str, float] = {}
 
     # ── public ────────────────────────────────────────────────────────────
+
+    def _check_stale(self) -> bool:
+        """Check if any indexed files have changed mtime. Returns True if reindex needed."""
+        if not self._file_mtimes:
+            return False
+        for fpath in _iter_source_files(self._project):
+            rel = str(fpath.relative_to(self._project))
+            old_mtime = self._file_mtimes.get(rel)
+            if old_mtime is not None and fpath.stat().st_mtime != old_mtime:
+                return True
+        # Also check for deleted files
+        existing_files = {str(fpath.relative_to(self._project)) for fpath in _iter_source_files(self._project)}
+        indexed_files = set(self._file_mtimes.keys())
+        if indexed_files - existing_files:
+            return True
+        return False
 
     def search(self, query: str, top_k: int = 5) -> list[SearchResult]:
         """Return top-k chunks most similar to *query*."""
@@ -225,13 +282,18 @@ class VectorIndex:
         if not self._chunks or self._vectors is None:
             return []
 
+        # Check for stale files and reindex if needed
+        if self._check_stale():
+            self.index_project()
+
         query_response = self._router.embed(
             text=query,
             local_model=self._local_model,
             remote_model=self._remote_model,
         )
         if not query_response.ok or query_response.embedding is None:
-            raise RuntimeError(query_response.error_reason or "provider unavailable")
+            self._last_error = query_response.error_reason or "semantic_search unavailable: provider не отвечает"
+            return []
 
         query_meta = IndexMetadata(
             provider_name=query_response.provider,
@@ -239,14 +301,19 @@ class VectorIndex:
             embedding_dim=len(query_response.embedding),
         )
         if self._meta and self._meta != query_meta:
-            self.index_project(force=True)
+            try:
+                self.index_project(force=True)
+            except RuntimeError as e:
+                self._last_error = str(e)
+                return []
             query_response = self._router.embed(
                 text=query,
                 local_model=self._local_model,
                 remote_model=self._remote_model,
             )
             if not query_response.ok or query_response.embedding is None:
-                raise RuntimeError(query_response.error_reason or "provider unavailable")
+                self._last_error = query_response.error_reason or "semantic_search unavailable: переиндексация не удалась"
+                return []
             query_meta = IndexMetadata(
                 provider_name=query_response.provider,
                 model=query_response.model,
@@ -308,8 +375,11 @@ class VectorIndex:
 
         # Discover current chunks
         all_chunks: list[Chunk] = []
+        self._file_mtimes = {}
         for fpath in _iter_source_files(self._project):
             all_chunks.extend(_extract_chunks(fpath, self._project))
+            rel = str(fpath.relative_to(self._project))
+            self._file_mtimes[rel] = fpath.stat().st_mtime
 
         # Determine which need (re)embedding
         new_chunks: list[Chunk] = []
@@ -335,7 +405,8 @@ class VectorIndex:
                 remote_model=self._remote_model,
             )
             if not response.ok or response.embedding is None:
-                raise RuntimeError(response.error_reason or "provider unavailable")
+                self._last_error = response.error_reason or "semantic_search unavailable: provider не отвечает при индексации"
+                continue
 
             meta = IndexMetadata(
                 provider_name=response.provider,
@@ -345,7 +416,8 @@ class VectorIndex:
             if expected_meta is None:
                 expected_meta = meta
             elif expected_meta != meta:
-                raise RuntimeError("provider unavailable: embedding provider/model changed during indexing")
+                self._last_error = "embedding provider/model изменился во время индексации"
+                continue
             new_vecs.append(response.embedding)
 
         # Merge
@@ -361,6 +433,13 @@ class VectorIndex:
         return len(new_chunks)
 
     # ── persistence ───────────────────────────────────────────────────────
+
+    @property
+    def last_error(self) -> Optional[str]:
+        return self._last_error
+
+    def clear_error(self) -> None:
+        self._last_error = None
 
     def _ensure_indexed(self) -> None:
         if not self._loaded:
@@ -382,7 +461,11 @@ class VectorIndex:
             self._chunks = [Chunk(**c) for c in raw]
             self._vectors = np.load(str(vectors_path))
             if meta_path.exists():
-                self._meta = IndexMetadata(**json.loads(meta_path.read_text()))
+                meta_data = json.loads(meta_path.read_text())
+                index_meta = meta_data.get("index")
+                if index_meta:
+                    self._meta = IndexMetadata(**index_meta)
+                self._file_mtimes = meta_data.get("file_mtimes", {})
             else:
                 # Legacy index without provider/model metadata must be rebuilt.
                 self._chunks = []
@@ -402,5 +485,9 @@ class VectorIndex:
         chunks_path.write_text(json.dumps([asdict(c) for c in self._chunks], indent=2))
         if self._vectors is not None:
             np.save(str(vectors_path), self._vectors)
+        meta_data = {}
         if self._meta is not None:
-            meta_path.write_text(json.dumps(asdict(self._meta), indent=2))
+            meta_data["index"] = asdict(self._meta)
+        if self._file_mtimes:
+            meta_data["file_mtimes"] = self._file_mtimes
+        meta_path.write_text(json.dumps(meta_data, indent=2))

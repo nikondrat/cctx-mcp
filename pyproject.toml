@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 code-context = "code_context.server:main"
+pre-index = "pre_index_cli:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]
@@ -24,3 +25,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
