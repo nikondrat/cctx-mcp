@@ -253,10 +253,41 @@ Swift · Python · TypeScript · JavaScript · Rust · Go · Dart
       "command": "uv",
       "args": ["--directory", "/path/to/code-context", "run", "server.py"],
       "env": {
-        "CC_COMMIT_MODEL": "gemma3:1b-it-qat",
+        "CC_COMMIT_MODEL": "gemma4:latest",
         "CC_EMBED_MODEL": "nomic-embed-text"
       }
     }
   }
+}
+```
+
+## Pre-indexing
+
+For faster first `semantic_search`, pre-build the vector index:
+
+```bash
+uv run pre-index /path/to/project
+```
+
+The server also auto-builds the index at startup (disable with `--skip-index`).
+
+## Health Check
+
+Check all system dependencies with a single call:
+
+```
+get_health()
+```
+
+Returns JSON with status of: Ollama, embedding model, vector index, tree-sitter, and server version. Each component has `status: "ok" | "error"`.
+
+Example response:
+```json
+{
+  "server": {"version": "0.3.0", "commit": "abc123"},
+  "ollama": {"status": "ok", "latency_ms": 42, "models": ["nomic-embed-text:latest", ...]},
+  "embedding_model": {"status": "ok", "model": "nomic-embed-text"},
+  "vector_index": {"status": "ok", "chunks": 927, "project": "/path/to/project"},
+  "tree_sitter": {"status": "ok", "version": "installed"}
 }
 ```
