@@ -108,10 +108,34 @@ class SwiftAnalyzer(BaseAnalyzer):
 
     def _get_symbol_name(self, node: ts.Node, source: bytes) -> str:
         """Extract symbol name from declaration node."""
+        # For init/deinit, return the keyword
+        if node.type in ("init_declaration", "deinit_declaration"):
+            for child in node.children:
+                if child.type in ("init", "deinit"):
+                    return self.get_node_text(child, source)
+            return "init"
+
+        # For functions and methods, name is in simple_identifier (right after 'func')
+        if node.type == "function_declaration":
+            for child in node.children:
+                if child.type == "simple_identifier":
+                    return self.get_node_text(child, source)
+            return ""
+
+        # For properties, name is in pattern → simple_identifier
+        if node.type == "property_declaration":
+            for child in node.children:
+                if child.type == "pattern":
+                    for pchild in child.children:
+                        if pchild.type == "simple_identifier":
+                            return self.get_node_text(pchild, source)
+            return ""
+
+        # For class/struct/enum/protocol/extension/typealias/operator: type_identifier or identifier
         for child in node.children:
-            if child.type == "type_identifier" or child.type == "identifier":
+            if child.type in ("type_identifier", "identifier", "simple_identifier"):
                 return self.get_node_text(child, source)
-            if child.type == "user_type" or child.type == "type_identifier":
+            if child.type == "user_type":
                 return self.get_node_text(child, source)
         return ""
 

@@ -1,6 +1,7 @@
-"""Search functionality for finding symbols and files in a project."""
+"""Search functionality for finding symbols, files, and content in a project."""
 
 import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -25,6 +26,13 @@ LANGUAGE_EXTENSIONS = {
     ".rs": RustAnalyzer,
     ".go": GoAnalyzer,
 }
+
+# Directories to skip during traversal
+SKIP_DIRS = frozenset({
+    ".git", "node_modules", "Pods", "build", "dist", ".build",
+    "__pycache__", "venv", ".venv", ".tox", "target", "DerivedData",
+    ".xcodeproj", ".xcworkspace", ".swiftpm",
+})
 
 
 class ProjectSearch:
@@ -181,3 +189,271 @@ class ProjectSearch:
                 file_path = Path(root) / file
                 if file_path.suffix.lower() in LANGUAGE_EXTENSIONS:
                     yield file_path
+
+    # ─── code_search: grep replacement ───────────────────────────────────
+
+    def code_search(
+        self,
+        pattern: str,
+        *,
+        use_regex: bool = False,
+        file_pattern: Optional[str] = None,
+        case_sensitive: bool = False,
+        context_lines: int = 2,
+        max_results: int = 100,
+    ) -> list[dict]:
+        """Search file contents for a pattern (grep replacement).
+
+        Args:
+            pattern: Text or regex pattern to search for
+            use_regex: Treat pattern as a regex
+            file_pattern: Glob pattern to filter files (e.g. "*.swift", "**/*Interactor*")
+            case_sensitive: Case-sensitive search
+            context_lines: Number of context lines before/after each match
+            max_results: Maximum number of matches to return
+
+        Returns:
+            List of dicts with file, line, text, and context
+        """
+        flags = 0 if case_sensitive else re.IGNORECASE
+        if use_regex:
+            try:
+                compiled = re.compile(pattern, flags)
+            except re.error:
+                return [{"error": f"Invalid regex: {pattern}"}]
+            match_fn = lambda line: compiled.search(line)
+        else:
+            if case_sensitive:
+                match_fn = lambda line: pattern in line
+            else:
+                lower_pattern = pattern.lower()
+                match_fn = lambda line: lower_pattern in line.lower()
+
+        results = []
+        for file_path in self._iter_all_files(self.project_path, file_pattern):
+            if len(results) >= max_results:
+                break
+            try:
+                lines = file_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            except Exception:
+                continue
+
+            for i, line in enumerate(lines):
+                if match_fn(line):
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines + 1)
+                    context = []
+                    for j in range(start, end):
+                        prefix = "  " if j != i else "▶ "
+                        context.append(f"{j+1}:{prefix}{lines[j]}")
+
+                    results.append({
+                        "file": str(file_path.relative_to(self.project_path)),
+                        "line": i + 1,
+                        "text": line.strip(),
+                        "context": "\n".join(context),
+                    })
+                    if len(results) >= max_results:
+                        break
+
+        return results
+
+    # ─── find_files: find replacement ────────────────────────────────────
+
+    def find_files(
+        self,
+        name_pattern: Optional[str] = None,
+        extension: Optional[str] = None,
+        path_contains: Optional[str] = None,
+        max_depth: Optional[int] = None,
+        max_results: int = 100,
+    ) -> list[dict]:
+        """Find files by name, extension, or path pattern (find replacement).
+
+        Args:
+            name_pattern: Glob pattern for filename (e.g. "*Interactor*", "*.swift")
+            extension: File extension to filter (e.g. "swift", "py") — without dot
+            path_contains: Substring that must appear in the relative path
+            max_depth: Maximum directory depth to search
+            max_results: Maximum number of results
+
+        Returns:
+            List of dicts with short relative path, size, and modification time
+        """
+        results = []
+        for file_path in self._iter_all_files(self.project_path, name_pattern, max_depth):
+            if len(results) >= max_results:
+                break
+
+            rel = file_path.relative_to(self.project_path)
+            rel_str = str(rel)
+
+            if extension and file_path.suffix.lstrip(".") != extension:
+                continue
+            if path_contains and path_contains.lower() not in rel_str.lower():
+                continue
+
+            try:
+                stat = file_path.stat()
+                size = stat.st_size
+                mtime = stat.st_mtime
+            except Exception:
+                size = 0
+                mtime = 0
+
+            results.append({
+                "path": rel_str,
+                "size_kb": round(size / 1024, 1),
+                "lines": self._count_lines_safe(file_path),
+                "modified": self._format_mtime(mtime),
+            })
+
+        return results
+
+    # ─── dir_summary: ls -la replacement ─────────────────────────────────
+
+    def dir_summary(
+        self,
+        dir_path: Optional[str] = None,
+        depth: int = 1,
+    ) -> str:
+        """Summarize a directory's structure (ls -la replacement).
+
+        Args:
+            dir_path: Relative path within project (or None for root)
+            depth: How many levels deep to show subdirectories
+
+        Returns:
+            Structured summary with subdirectories, file counts by type, and total size
+        """
+        target = self.project_path / dir_path if dir_path else self.project_path
+        if not target.is_dir():
+            return f"Error: Directory not found: {dir_path or '(project root)'}"
+
+        return self._build_dir_summary(target, self.project_path, depth, prefix="")
+
+    def _build_dir_summary(
+        self,
+        directory: Path,
+        project_root: Path,
+        depth: int,
+        prefix: str,
+    ) -> str:
+        """Recursively build directory summary."""
+        rel = directory.relative_to(project_root)
+        lines = [f"📁 {rel}/" if rel != Path(".") else f"📁 {project_root.name}/"]
+
+        try:
+            entries = sorted(directory.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+        except PermissionError:
+            lines.append("  (permission denied)")
+            return "\n".join(lines)
+
+        # Group by type
+        subdirs = []
+        files_by_ext: dict[str, list[Path]] = {}
+        total_size = 0
+
+        for entry in entries:
+            if entry.name.startswith(".") or entry.name in SKIP_DIRS:
+                continue
+            if entry.is_dir():
+                subdirs.append(entry)
+            elif entry.is_file():
+                ext = entry.suffix.lower() or "(no ext)"
+                files_by_ext.setdefault(ext, []).append(entry)
+                try:
+                    total_size += entry.stat().st_size
+                except Exception:
+                    pass
+
+        # Show subdirectories
+        for sd in subdirs:
+            sd_rel = sd.relative_to(project_root)
+            sd_files = sum(1 for _ in self._iter_all_files(sd, max_depth=1))
+            lines.append(f"  📂 {sd.name}/  ({sd_files} source files)")
+            if depth > 1:
+                sub_summary = self._build_dir_summary(sd, project_root, depth - 1, prefix + "  ")
+                # Indent sub-summary lines
+                for sub_line in sub_summary.split("\n")[1:]:  # skip header
+                    lines.append(f"    {sub_line}")
+
+        # Show file type summary
+        if files_by_ext:
+            lines.append("")
+            lines.append("  Files by type:")
+            for ext, files in sorted(files_by_ext.items(), key=lambda x: -len(x[1])):
+                ext_size = sum(f.stat().st_size for f in files if f.exists())
+                lines.append(f"    {ext}: {len(files)} files  ({ext_size / 1024:.0f} KB)")
+
+        lines.append(f"  Total size: {total_size / 1024:.0f} KB")
+        return "\n".join(lines)
+
+    # ─── helpers ─────────────────────────────────────────────────────────
+
+    def _iter_all_files(
+        self,
+        path: Path,
+        name_pattern: Optional[str] = None,
+        max_depth: Optional[int] = None,
+    ):
+        """Iterate over all files (not just source files) with optional filtering."""
+        if not path.exists():
+            return
+
+        base_depth = len(path.relative_to(self.project_path).parts) if path != self.project_path else 0
+
+        for root, dirs, files in os.walk(path):
+            current = Path(root)
+            rel = current.relative_to(self.project_path)
+            current_depth = len(rel.parts)
+
+            if max_depth is not None and current_depth - base_depth >= max_depth:
+                dirs.clear()
+                continue
+
+            # Skip ignored directories
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in SKIP_DIRS]
+            dirs.sort()
+
+            for file in sorted(files):
+                file_path = current / file
+                if name_pattern and not self._match_glob(file, name_pattern):
+                    continue
+                yield file_path
+
+    @staticmethod
+    def _match_glob(filename: str, pattern: str) -> bool:
+        """Simple glob matching supporting * and **."""
+        if "**" in pattern:
+            # ** matches any path segments — use regex
+            regex = pattern.replace("**/", "(.+/)?").replace("**", ".*").replace("*", "[^/]*")
+            return bool(re.match(f"^{regex}$", filename))
+        if "*" in pattern:
+            regex = pattern.replace("*", ".*")
+            return bool(re.match(f"^{regex}$", filename))
+        return filename == pattern
+
+    @staticmethod
+    def _count_lines_safe(file_path: Path) -> int:
+        """Count lines in a file, returning 0 on error."""
+        try:
+            with open(file_path, "rb") as f:
+                return sum(1 for _ in f)
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _format_mtime(mtime: float) -> str:
+        """Format modification time as relative string."""
+        import time
+        diff = time.time() - mtime
+        if diff < 60:
+            return "just now"
+        if diff < 3600:
+            return f"{int(diff // 60)}m ago"
+        if diff < 86400:
+            return f"{int(diff // 3600)}h ago"
+        if diff < 604800:
+            return f"{int(diff // 86400)}d ago"
+        return time.strftime("%Y-%m-%d", time.localtime(mtime))

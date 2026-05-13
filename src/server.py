@@ -201,6 +201,128 @@ def analyze_project(project_path: str, max_depth: int = 2) -> str:
     return "\n".join(output)
 
 
+@mcp.tool()
+def code_search(
+    project_path: str,
+    pattern: str,
+    use_regex: bool = False,
+    file_pattern: Optional[str] = None,
+    case_sensitive: bool = False,
+    context_lines: int = 2,
+    max_results: int = 50,
+) -> str:
+    """Search file contents across a project (grep replacement).
+
+    Args:
+        project_path: Path to the project root
+        pattern: Text or regex pattern to search for
+        use_regex: Treat pattern as a regular expression
+        file_pattern: Glob pattern to filter files (e.g. "*.swift", "**/*Interactor*")
+        case_sensitive: Case-sensitive search
+        context_lines: Number of context lines before/after each match
+        max_results: Maximum number of matches to return
+
+    Returns:
+        Matches with file, line, text, and surrounding context
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    search = get_search(project_path)
+    results = search.code_search(
+        pattern,
+        use_regex=use_regex,
+        file_pattern=file_pattern,
+        case_sensitive=case_sensitive,
+        context_lines=context_lines,
+        max_results=max_results,
+    )
+
+    if not results:
+        return "No matches found."
+
+    if "error" in results[0]:
+        return f"Error: {results[0]['error']}"
+
+    output = [f"Found {len(results)} matches for '{pattern}':"]
+    for r in results:
+        output.append("")
+        output.append(f"  {r['file']}:{r['line']}")
+        output.append(r["context"])
+
+    return "\n".join(output)
+
+
+@mcp.tool()
+def find_files(
+    project_path: str,
+    name_pattern: Optional[str] = None,
+    extension: Optional[str] = None,
+    path_contains: Optional[str] = None,
+    max_depth: Optional[int] = None,
+    max_results: int = 50,
+) -> str:
+    """Find files by name, extension, or path (find/ls replacement).
+
+    Args:
+        project_path: Path to the project root
+        name_pattern: Glob pattern for filename (e.g. "*Interactor*", "*.swift")
+        extension: File extension without dot (e.g. "swift", "py")
+        path_contains: Substring that must appear in the relative path
+        max_depth: Maximum directory depth to search
+        max_results: Maximum number of results
+
+    Returns:
+        List of files with short relative paths, sizes, and line counts
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    search = get_search(project_path)
+    results = search.find_files(
+        name_pattern=name_pattern,
+        extension=extension,
+        path_contains=path_contains,
+        max_depth=max_depth,
+        max_results=max_results,
+    )
+
+    if not results:
+        return "No files found matching criteria."
+
+    output = [f"Found {len(results)} files:"]
+    for r in results:
+        output.append(f"  {r['path']}  ({r['size_kb']} KB, {r['lines']} lines, {r['modified']})")
+
+    return "\n".join(output)
+
+
+@mcp.tool()
+def dir_summary(
+    project_path: str,
+    dir_path: Optional[str] = None,
+    depth: int = 1,
+) -> str:
+    """Summarize a directory's structure (ls -la replacement).
+
+    Args:
+        project_path: Path to the project root
+        dir_path: Relative path within project (or None for root)
+        depth: How many levels deep to show subdirectories
+
+    Returns:
+        Structured summary with subdirectories, file counts by type, and sizes
+    """
+    path = Path(project_path)
+    if not path.exists():
+        return f"Error: Project not found: {project_path}"
+
+    search = get_search(project_path)
+    return search.dir_summary(dir_path=dir_path, depth=depth)
+
+
 def main():
     """Run the MCP server."""
     import os

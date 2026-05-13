@@ -133,9 +133,20 @@ class BaseAnalyzer(ABC):
 
     def get_doc_comment(self, node: ts.Node, source: bytes) -> Optional[str]:
         """Extract documentation comment preceding a node."""
-        # Look for comment nodes before this node
+        # Look for comment nodes before this node, stopping at any declaration
+        declaration_types = (
+            "class_declaration", "struct_declaration", "enum_declaration",
+            "protocol_declaration", "extension_declaration",
+            "function_declaration", "init_declaration", "deinit_declaration",
+            "property_declaration", "subscript_declaration",
+            "typealias_declaration", "operator_declaration",
+            "class_body", "struct_body", "enum_class_body", "enum_body",
+        )
         prev_node = node.prev_sibling
         while prev_node:
+            if prev_node.type in declaration_types:
+                # Stop — another declaration is between us and the comment
+                return None
             if prev_node.type in ("comment", "line_comment", "block_comment", "documentation_comment"):
                 text = self.get_node_text(prev_node, source)
                 # Clean up comment markers
