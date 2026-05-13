@@ -19,11 +19,11 @@ SERVER_CMD = ["uv", "run", "python", "-m", "code_context.server", "--skip-index"
 
 # 5 queries with expected files (top-3 should contain these)
 QUERIES = [
-    ("vector index search", ["src/vector_index.py"]),
-    ("project search find symbols", ["src/search.py"]),
-    ("git commit change summary", ["src/change_intel.py"]),
-    ("semantic code summaries tool", ["src/summaries.py", "src/server.py"]),
-    ("MCP instrumentation decorator", ["src/server.py"]),
+    ("vector index search", ["src/code_context/vector_index.py"]),
+    ("project search find symbols", ["src/code_context/search.py"]),
+    ("git commit change summary", ["src/code_context/change_intel.py"]),
+    ("semantic code summaries tool", ["src/code_context/summaries.py", "src/code_context/server.py"]),
+    ("MCP instrumentation decorator", ["src/code_context/server.py"]),
 ]
 
 
