@@ -1,62 +1,47 @@
 # Code Context — AI Agent Guide
 
+> **CCTX-MCP** (`uvx cctx-mcp`) — replace expensive native operations with structured analysis tools for 80-99% token savings.
+
+---
+
 ## MANDATORY: Use These Tools First
 
-This MCP server exists to **replace expensive native operations**. Using `cat`, `grep`, `find`, or reading entire files when these tools are available wastes tokens and is the wrong approach.
+This MCP server exists to **replace expensive native operations** (`Read`, `grep`, `find`, `cat`, `git diff`). When any of these tools are available, you MUST prefer them over native alternatives.
 
-### Priority Rules (non-negotiable)
+### Tool Naming
 
-| Instead of this | Use this | Token savings |
-|-----------------|----------|---------------|
-| `Read` / `cat` entire file | `smart_read` | ~87% |
-| `Grep` / searching for a symbol | `find_symbols` or `semantic_search` | ~90% |
-| `Glob` / `find` for files | `find_files` or `dir_summary` | ~80% |
-| Manual import parsing | `get_dependencies` | ~95% |
-| Searching call sites by grep | `trace_calls` | ~90% |
-| `git diff` + manual parsing | `compact_change_intelligence` | ~75% |
-| Reading file to understand structure | `smart_read` → then read only if needed | ~87% |
-| Exploring unfamiliar codebase | `analyze_project` → `smart_read` per file | ~85% |
+Tool names may be **prefixed** depending on your MCP client:
+- **opencode**: `code-context_smart_read`, `code-context_find_symbols`, `code-context_get_version`, etc.
+- **Claude Desktop**: `smart_read`, `find_symbols`, `get_version`, etc. (no prefix)
+- **Cursor**: depends on configuration
 
-**The only exception:** read a file directly only when you need the full implementation body to make an edit. Even then, use `smart_read` first to locate the exact symbol, then read only the relevant line range.
+When in doubt, check your available tool list for the prefix.
 
----
+### Priority Rules
 
-## Decision Tree: Which Tool to Use
+| Instead of this | Use this | Savings |
+|-----------------|----------|---------|
+| `Read` / `cat` entire file | `smart_read` (smart_read) | ~87% |
+| `Grep` for a symbol across project | `find_symbols` (find_symbols) | ~99% |
+| Manual import parsing | `get_dependencies` (get_dependencies) | ~96% |
+| Searching call sites by grep | `trace_calls` (trace_calls) | ~90% |
+| Exploring unfamiliar codebase | `analyze_project` (analyze_project) | ~98% |
+| Reading file just to understand symbols | `smart_read` → read only if needed | ~87% |
+| `git diff` + `git status` | `compact_change_intelligence` | ~75% |
+| Writing commit message from scratch | `draft_commit` | ~90% |
 
-```
-Need to understand code?
-├── Unfamiliar codebase → analyze_project
-├── Specific file structure → smart_read
-├── Find a function/class by name → find_symbols
-├── Natural language query ("where is auth handled?") → semantic_search
-├── Find callers of a function → trace_calls
-├── Understand imports → get_dependencies
-└── Browse directory → dir_summary
-
-Need to commit?  ⚠️ ABSOLUTE REQUIREMENT — see "Commit Flow" section below
-├── Understand what changed → compact_change_intelligence
-├── Generate message → draft_commit
-└── Execute commit → approve_commit_draft
-```
+**The only exception**: read a file directly only when you need the full implementation body to make an edit. Even then, use `smart_read` first to locate the exact symbol, then read only the relevant line range.
 
 ---
 
-## Tools Reference
+## Tool Reference
 
 ### `smart_read(file_path, project_path?)`
 Structured file analysis: symbol hierarchy, dependencies, line ranges, doc comments.
-Use before reading any file. Only read full file if you need implementation details after seeing the structure.
+**Use before reading any file.** Only read full file if you need implementation details.
 
 ```
 smart_read(file_path="src/auth/provider.py", project_path="/project")
-```
-
-### `semantic_search(query, project_path, top_k?)`
-Natural language search over indexed codebase using embeddings.
-Fastest path for "find where X is done" questions — returns relevant code chunks, not full files.
-
-```
-semantic_search(query="user authentication token validation", project_path="/project", top_k=5)
 ```
 
 ### `find_symbols(project_path, name?, symbol_type?)`
@@ -81,250 +66,102 @@ trace_calls(symbol_name="AuthProvider.login", project_path="/project")
 ```
 
 ### `analyze_project(project_path, max_depth?)`
-Project-wide structure: file counts, languages, directory tree. Always start here on unfamiliar projects.
+Project-wide structure: file counts, languages, directory tree.
 
 ```
 analyze_project(project_path="/project", max_depth=2)
 ```
 
 ### `get_symbol_summaries(file_path, project_path?)`
-Semantic summaries per symbol: purpose, behavior, confidence, provenance. Lazy + cached.
+Semantic summaries per symbol: purpose, behavior, confidence, provenance.
 
 ```
 get_symbol_summaries(file_path="src/server.py", project_path="/project")
 ```
 
-### `find_files(project_path, name_pattern?, extension?, path_contains?)`
-Find files by name pattern, extension, or path substring.
+### `compact_change_intelligence(project_path)`
+Structured diff + intent cues. Replaces `git diff` + `git status`.
 
 ```
-find_files(project_path="/project", name_pattern="*Controller*", extension="py")
+compact_change_intelligence(project_path="/project")
 ```
 
-### `dir_summary(project_path, dir_path?, depth?)`
-Directory listing with file counts and sizes — `ls -la` replacement.
+### `draft_commit(project_path)`
+AI-generated conventional commit message from working changes.
 
 ```
-dir_summary(project_path="/project", dir_path="src/api", depth=2)
+draft_commit(project_path="/project")
 ```
 
-### `code_search(project_path, pattern, use_regex?, file_pattern?, context_lines?)`
-Regex/text search across files with context. Use when `find_symbols` isn't specific enough.
+### `approve_commit_draft(project_path, message?)`
+Execute git commit after reviewing draft. If message is provided, uses it instead.
 
 ```
-code_search(project_path="/project", pattern="TODO|FIXME", file_pattern="*.py")
+approve_commit_draft(project_path="/project")
 ```
+
+### `get_version()`
+Server version for staleness detection. Call after any edit to verify server picked it up.
+
+### `get_health()`
+System dependency health: Ollama, embeddings, vector index, tree-sitter.
+
+### `get_config()`
+Current feature flags and provider settings.
 
 ---
 
-## Server Version Protocol
+## Integration in Other Projects
 
-After editing any source file in `src/`, the MCP server running in memory becomes stale. The server MUST be restarted for changes to take effect.
+Copy this section into any project's `.opencode/AGENTS.md` to make AI agents use CCTX-MCP tools:
 
-### Version Bump Policy
-
-After every source edit, bump the `SERVER_VERSION` constant in `server.py`:
-- **PATCH** (0.1.0 → 0.1.1): bug fixes
-- **MINOR** (0.1.0 → 0.2.0): new features, tools
-- **MAJOR** (1.0.0 → 2.0.0): breaking changes
-
-### Staleness Detection Flow
+### Agent Instructions Template
 
 ```
-1. Edit source code → bump SERVER_VERSION
-2. Call get_version()
-3. Compare returned version with expected version
-   ├── Match → server is up to date ✓
-   └── Mismatch → server is stale!
-        → "Server is running stale code (vX.Y.Z, expected vA.B.C).
-           Please restart opencode to pick up changes."
-```
+## MANDATORY: CCTX-MCP Tools (80-99% Token Savings)
 
-You MUST call `get_version()` after bumping and check for staleness. If the server is stale, do NOT continue using tools — prompt the user to restart.
+CCTX-MCP is configured as an MCP server. Its tools MUST be preferred over native operations.
+
+| Instead of this | Use this |
+|-----------------|----------|
+| `Read` entire file | `smart_read` |
+| `Grep` for symbols | `find_symbols` |
+| Manual call site search | `trace_calls` |
+| Project exploration | `analyze_project` |
+| `git diff` / `git status` | `compact_change_intelligence` |
+| Writing commit messages | `draft_commit` |
+
+Tool names may be prefixed (e.g. `code-context_smart_read`). Check your available tool list.
+```
 
 ---
 
 ## Commit Flow — ABSOLUTE REQUIREMENT
 
-<EXTREMELY-IMPORTANT>
-Running native git commands (`git diff`, `git status`, `git log`, `git commit`) for commit-related tasks is strictly prohibited. It wastes 75%+ tokens per operation and bypasses the commit drafting gate.
+You MUST NOT use:
+- `git commit` or `git add` directly. Use these tools instead:
 
-You MUST use the code-context MCP commit flow for ALL commit operations:
+| Instead of this | Use this |
+|-----------------|----------|
+| `git diff` + `git status` | `compact_change_intelligence` |
+| Writing commit message | `draft_commit` |
+| `git add` + `git commit` | `approve_commit_draft` |
 
-```
-1. compact_change_intelligence(project_path)   → structured diff + intent cues
-2. draft_commit(project_path)                  → AI-generated candidate message
-3. approve_commit_draft(project_path, message?) → execute git commit
-```
+Flow:
+1. `compact_change_intelligence(project_path)` to see what changed
+2. `draft_commit(project_path)` to generate a commit message
+3. `approve_commit_draft(project_path)` or `approve_commit_draft(project_path, message='...')` to commit
 
-You MUST NOT use: `git diff`, `git status`, `git log`, `git add`, `git commit`, or any other native git command for commit operations.
-
-There are zero exceptions. This is not negotiable.
-</EXTREMELY-IMPORTANT>
-
-### Fallback — MCP Server Unavailable
-
-If `compact_change_intelligence` or `draft_commit` returns an error (e.g., MCP server unavailable), use `approve_commit_draft(project_path, message='...')` with a manually written conventional commit message. NEVER fall back to bash `git commit`.
-
-### Red Flags — Commit Rationalization
-
-If you catch yourself thinking any of these, STOP — you are rationalizing:
-
-| Thought | Reality |
-|---------|---------|
-| "I'll just run `git diff` to see what changed" | Use `compact_change_intelligence` — structured output, 75% fewer tokens |
-| "Let me check `git status` real quick" | `compact_change_intelligence` includes status + diff in one call |
-| "I'll just commit directly, it's a simple change" | Always use the 3-step commit flow. Drafting catches message quality issues. |
-| "I'm only looking at git log for context" | `compact_change_intelligence` already includes recent history |
-| "The MCP tool might not work on this project" | It works. This is rationalization. Use the tool. |
-| "This doesn't need a formal commit flow" | Every commit does. The gate prevents accidental commits. |
-| "Let me git add && git commit quickly" | Even staging should go through the MCP tools. Always. |
-| "I need to see the raw diff, the tool strips data" | `compact_change_intelligence` is lossless — full diff + structured metadata |
-| "The MCP tool returned an error, I'll just git commit directly" | Use the fallback: `approve_commit_draft(project_path, message='...')` with a manual message. NEVER fall back to bash `git commit`. |
-| "I just fixed the code, the server will pick it up" | The running server still has old code. Bump `SERVER_VERSION` and call `get_version()` to verify. |
+**NEVER fall back to bash `git commit`**. If the tools fail, report the error — don't use native git commands.
 
 ---
 
-## Observability
+## Development Logging
 
-### `get_config()`
-Current feature flag state (routing mode, providers, models, and rollout flags).
-
-### `get_metrics_report()`
-Cache hit rate, summary latency, **real token savings** (baseline vs actual), draft acceptance rate.
-
-### `get_metrics_events(limit?)`
-Recent tool-call records (timestamp, tool name, latency, success/error, tokens) from
-`~/.code-context-cache/metrics/events.jsonl`.
-
-### `reset_metrics()`
-Archive all recorded events and daily snapshots, zero counters. Use before a new session
-or after schema changes. Archives: events.jsonl → events.jsonl.bak, daily/ → daily/archive/.
-
-### `get_metrics_daily_trend(days?)`
-Daily snapshot trend with per-tool call count, latency, errors, and token savings.
-Shows estimate vs real savings for tools with token measurement enabled.
-
-### `get_metrics_slowest(limit?)`
-Top-N slowest tools by average latency with call count and error count.
-
----
-
-## Real Metrics — Interpreting Token Savings
-
-Every tool call now records actual input/output token counts and an estimated baseline
-(what a native alternative like grep/read/find would cost).
-
-Key metrics fields in events:
-- `tokens_baseline`: estimated tokens for native operation
-- `tokens_output`: actual tokens returned by code-context tool
-- `savings_tokens`: `baseline - (input + output)`, capped at 0
-- `baseline_op`: the native operation being replaced (e.g. "read_file", "grep", "ls")
-- `is_estimate`: `true` for events recorded before real token measurement was added
-
-Savings examples by tool (from `get_metrics_daily_trend`):
-```
-smart_read:     baseline=file_line_count×4,  output=result_tokens,        savings_pct ~87%
-semantic_search: baseline=grep+read_estimate, output=chunk_tokens,         savings_pct ~96%
-find_symbols:   baseline=files_scanned×200,  output=symbol_list_tokens,    savings_pct ~99%
-code_search:    baseline=matches×context×4,  output=match_results_tokens, savings_pct ~90%
-compact_change_intelligence: baseline=raw_git_diff, output=compact_json,   savings_pct ~75%
-```
-
-Use `get_metrics_report()` to see real vs estimated savings breakdown for the current session.
-Use `reset_metrics()` to start fresh. All savings data is stored in `~/.code-context-cache/metrics/events.jsonl`.
-
----
-
-## Feature Flags
-
-| Env var | Default | Effect |
-|---------|---------|--------|
-| `CC_SEMANTIC_SUMMARIES` | `1` | Enable semantic symbol summaries |
-| `CC_COMMIT_DRAFTING` | `1` | Enable commit draft generation |
-| `CC_LLM_ROUTER` | `local-first` | Routing policy: `local-first`, `local-only`, `remote-first`, `remote-only` |
-| `CC_LOCAL_PROVIDER` | `ollama` | Local provider identifier |
-| `CC_REMOTE_PROVIDER` | `openrouter` | Remote provider identifier |
-| `CC_COMMIT_MODEL` | `gemma4:latest` | Local model for commit generation (`""` = disable local commit generation) |
-| `CC_EMBED_MODEL` | `nomic-embed-text` | Local model for embeddings (`""` = disable local embeddings) |
-| `CC_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
-| `CC_OLLAMA_TIMEOUT` | `10` | Request timeout in seconds |
-| `CC_OPENROUTER_API_KEY` | `` | OpenRouter API key (required for remote modes/fallback) |
-| `CC_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base URL |
-| `CC_OPENROUTER_TIMEOUT` | `10` | OpenRouter request timeout in seconds |
-| `CC_OPENROUTER_EMBED_MODEL` | `text-embedding-3-small` | Remote embeddings model |
-| `CC_OPENROUTER_COMMIT_MODEL` | `openai/gpt-4o-mini` | Remote commit model |
-| `CC_OPENROUTER_MAX_TOKENS` | `256` | Max generation tokens for remote commit drafting |
-| `CC_OPENROUTER_TEMPERATURE` | `0.1` | Sampling temperature for remote commit drafting |
-
-Notes:
-- `local-first` prioritizes Ollama for privacy/latency and falls back to OpenRouter.
-- If OpenRouter token is missing, remote calls fail safely with explicit `provider unavailable` errors.
-
----
-
-## Token Budget Reference
-
-| Operation | Native approach | With code-context | Savings |
-|-----------|----------------|-------------------|---------|
-| Read 500-line file | ~1500 tokens | ~200 tokens (smart_read) | **87%** |
-| Find function across project | ~5000 tokens (grep + reads) | ~50 tokens (find_symbols) | **99%** |
-| Understand imports | ~800 tokens | ~30 tokens (get_dependencies) | **96%** |
-| Semantic query | ~8000 tokens (read many files) | ~300 tokens (semantic_search) | **96%** |
-| Analyze project structure | ~10000 tokens | ~150 tokens (analyze_project) | **98%** |
-
----
-
-## Supported Languages
-
-Swift · Python · TypeScript · JavaScript · Rust · Go · Dart
-
----
-
-## MCP Configuration
-
-```json
-{
-  "mcpServers": {
-    "code-context": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/code-context", "run", "server.py"],
-      "env": {
-        "CC_COMMIT_MODEL": "gemma4:latest",
-        "CC_EMBED_MODEL": "nomic-embed-text"
-      }
-    }
-  }
-}
-```
-
-## Pre-indexing
-
-For faster first `semantic_search`, pre-build the vector index:
+Tool calls are logged to `~/.code-context-cache/debug.jsonl` with args, result preview, latency, and status. Watch in real-time:
 
 ```bash
-uv run pre-index /path/to/project
+tail -f ~/.code-context-cache/debug.jsonl
 ```
 
-The server also auto-builds the index at startup (disable with `--skip-index`).
-
-## Health Check
-
-Check all system dependencies with a single call:
-
-```
-get_health()
-```
-
-Returns JSON with status of: Ollama, embedding model, vector index, tree-sitter, and server version. Each component has `status: "ok" | "error"`.
-
-Example response:
-```json
-{
-  "server": {"version": "0.3.0", "commit": "abc123"},
-  "ollama": {"status": "ok", "latency_ms": 42, "models": ["nomic-embed-text:latest", ...]},
-  "embedding_model": {"status": "ok", "model": "nomic-embed-text"},
-  "vector_index": {"status": "ok", "chunks": 927, "project": "/path/to/project"},
-  "tree_sitter": {"status": "ok", "version": "installed"}
-}
-```
+Set `CC_DEBUG_LOG` env var to change the log path.

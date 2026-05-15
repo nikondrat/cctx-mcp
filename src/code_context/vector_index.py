@@ -93,17 +93,27 @@ _MAX_SNIPPET_CHARS = 400
 
 
 def _iter_source_files(project_path: Path):
+    _skip_dirs = frozenset({
+        "node_modules", ".venv", "venv", "target", "build", "dist",
+        ".build", "Pods", ".git", "__pycache__", ".tox",
+        ".cursor", ".opencode", "openspec",
+        ".swiftpm", ".xcodeproj", ".xcworkspace",
+    })
+    _skip_files = frozenset({"AGENTS.md", "CLAUDE.md"})
+
     for path in project_path.rglob("*"):
         if path.suffix not in _SOURCE_EXTENSIONS:
             continue
+        if path.name in _skip_files:
+            continue
         parts = set(path.parts)
-        if parts & {"node_modules", ".venv", "venv", "target", "build", "dist", ".build", "Pods"}:
+        if parts & _skip_dirs:
             continue
         if path.is_file():
             yield path
 
 
-_CLASS_KEYWORDS = {"class", "struct", "enum", "protocol", "interface", "trait"}
+_CLASS_KEYWORDS = {"class", "struct", "enum", "protocol", "interface", "trait", "actor"}
 
 _ANALYZER_LANG_MAP: dict[str, str] = {
     ".py": "python",
@@ -173,7 +183,7 @@ def _symbols_to_chunks(symbols, rel: str, fhash: str, lines: list[str]) -> list[
 
 def _regex_extract_chunks(lines: list[str], text: str, rel: str, fhash: str) -> list[Chunk]:
     import re
-    _def_re = re.compile(r"^(\s*)(def |class |func |fn |function |pub fn |public |private |@interface |struct |enum |trait )\s*(\w+)")
+    _def_re = re.compile(r"^(\s*)(def |class |func |fn |function |pub fn |public |private |@interface |struct |enum |trait |actor |macro )\s*(\w+)")
     _md_heading_re = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
 
     chunks: list[Chunk] = []

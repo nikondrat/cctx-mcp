@@ -115,7 +115,7 @@ class FileAnalysis:
 
 def _indent_level(sym: Symbol) -> int:
     """Determine indentation level based on symbol type."""
-    if sym.type in ("class", "struct", "enum", "interface", "protocol", "extension"):
+    if sym.type in ("class", "struct", "enum", "interface", "protocol", "extension", "actor"):
         return 0
     return 1
 

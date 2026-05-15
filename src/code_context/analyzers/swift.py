@@ -58,23 +58,39 @@ class SwiftAnalyzer(BaseAnalyzer):
 
     def _collect_symbols(self, node: ts.Node, source: bytes, symbols: list[Symbol], parent: Optional[Symbol] = None):
         """Recursively collect symbols from AST."""
-        symbol_map = {
-            "class_declaration": "class",
-            "struct_declaration": "struct",
-            "enum_declaration": "enum",
+        keyword_to_type = {
+            "class": "class",
+            "struct": "struct",
+            "enum": "enum",
+            "protocol": "protocol",
+            "extension": "extension",
+            "actor": "actor",
+        }
+        simple_map = {
             "protocol_declaration": "protocol",
-            "extension_declaration": "extension",
             "function_declaration": "function",
             "init_declaration": "method",
             "deinit_declaration": "method",
             "subscript_declaration": "method",
             "property_declaration": "property",
             "typealias_declaration": "typealias",
+            "associated_type_declaration": "typealias",
             "operator_declaration": "operator",
+            "precedence_group_declaration": "precedencegroup",
+            "macro_declaration": "macro",
         }
 
-        if node.type in symbol_map:
-            sym_type = symbol_map[node.type]
+        sym_type = None
+
+        if node.type == "class_declaration":
+            for child in node.children:
+                if child.type in keyword_to_type:
+                    sym_type = keyword_to_type[child.type]
+                    break
+        elif node.type in simple_map:
+            sym_type = simple_map[node.type]
+
+        if sym_type:
             name = self._get_symbol_name(node, source)
             if name:
                 doc = self.get_doc_comment(node, source)
@@ -96,8 +112,8 @@ class SwiftAnalyzer(BaseAnalyzer):
                 else:
                     parent.children.append(sym)
 
-                # Collect children (methods inside class, etc.)
-                if sym_type in ("class", "struct", "enum", "protocol", "extension"):
+                # Collect children (methods, nested types inside containers)
+                if sym_type in ("class", "struct", "enum", "protocol", "extension", "actor"):
                     for child in node.children:
                         self._collect_symbols(child, source, symbols, parent=sym)
                 return

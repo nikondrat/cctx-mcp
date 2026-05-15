@@ -34,7 +34,7 @@ SKIP_DIRS = frozenset({
     ".git", "node_modules", "Pods", "build", "dist", ".build",
     "__pycache__", "venv", ".venv", ".tox", "target", "DerivedData",
     ".xcodeproj", ".xcworkspace", ".swiftpm",
-    "openspec",
+    "openspec", ".cursor", ".opencode",
 })
 
 
@@ -152,37 +152,51 @@ class ProjectSearch:
         results = []
         seen: set[tuple[str, int]] = set()
 
-        # Dotted paths (e.g. Class.method) are common in queries; use final token for lookups.
         parts = [p for p in symbol_name.split(".") if p]
         short_symbol = parts[-1] if parts else symbol_name
 
+        # Use exact name match for definition lookup (not substring)
         definitions = self.find_symbols(search_path, name=short_symbol)
-        definition_files = {d["file"] for d in definitions}
+        definition_files = {
+            d["file"] for d in definitions
+            if d["name"].lower() == short_symbol.lower()
+        }
 
-        call_patterns = []
-        if short_symbol:
-            escaped = re.escape(short_symbol)
-            call_patterns = [
-                re.compile(rf"\.{escaped}\s*\("),
-                re.compile(rf"\b{escaped}\s*\("),
-            ]
-        full_symbol = symbol_name.strip()
+        # Build word-boundary regex patterns
+        escaped = re.escape(short_symbol)
+        call_patterns = [
+            re.compile(rf"\.{escaped}\s*\("),
+            re.compile(rf"\b{escaped}\s*\("),
+        ]
 
-        # Now search for usages in other files
+        # Full dotted-path pattern with word boundaries
+        if len(parts) > 1:
+            full_pattern = re.compile(
+                r"\b" + r"\.".join(re.escape(p) for p in parts) + r"\b"
+            )
+        elif short_symbol:
+            full_pattern = re.compile(rf"\b{re.escape(short_symbol)}\b")
+        else:
+            full_pattern = None
+
         for file_path in self._iter_source_files(search_path):
-            # Skip files where symbol is defined
             rel_path = str(file_path.relative_to(self.project_path))
             if rel_path in definition_files:
                 continue
 
-            # Read file content and search for symbol name
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
                 lines = content.splitlines()
                 for i, line in enumerate(lines, 1):
-                    matches_full = bool(full_symbol and full_symbol in line)
-                    matches_call = any(pattern.search(line) for pattern in call_patterns)
-                    if not (matches_full or matches_call):
+                    matched = False
+                    if full_pattern and full_pattern.search(line):
+                        matched = True
+                    if not matched:
+                        for pattern in call_patterns:
+                            if pattern.search(line):
+                                matched = True
+                                break
+                    if not matched:
                         continue
 
                     key = (rel_path, i)

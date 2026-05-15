@@ -1,13 +1,17 @@
 """Shared server context — threading local for token baseline tracking."""
 
+import json
+import os
 import threading
 import time
 import functools
+from pathlib import Path
 from typing import Any, Optional
 
 from code_context.metrics import get_metrics
 
 _tool_token_ctx = threading.local()
+_DEBUG_LOG = os.environ.get("CC_DEBUG_LOG", str(Path.home() / ".code-context-cache" / "debug.jsonl"))
 
 
 def set_tool_baseline(baseline: int = 0, baseline_op: str = ""):
@@ -27,6 +31,16 @@ def _result_ok(result: Any) -> bool:
         if "not found" in lowered or "no matches" in lowered:
             return False
     return True
+
+
+def _write_debug_log(entry: dict):
+    try:
+        path = Path(_DEBUG_LOG)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except Exception:
+        pass
 
 
 def instrument_tool(tool_name: str):
@@ -57,6 +71,15 @@ def instrument_tool(tool_name: str):
                     tokens_baseline=getattr(_tool_token_ctx, 'baseline', 0),
                     baseline_op=getattr(_tool_token_ctx, 'baseline_op', ''),
                 )
+                _write_debug_log({
+                    "ts": time.time(),
+                    "tool": tool_name,
+                    "args": str(args),
+                    "kwargs": {k: str(v) for k, v in kwargs.items()} if kwargs else {},
+                    "ok": ok,
+                    "latency_ms": latency_ms,
+                    "result_preview": (result[:500] + "...") if isinstance(result, str) and len(result) > 500 else result,
+                })
 
         return wrapper
 

@@ -12,7 +12,7 @@ from mcp.server.fastmcp import FastMCP
 
 from code_context.context import instrument_tool
 
-SERVER_VERSION = "0.5.4"
+SERVER_VERSION = "0.6.0"
 
 try:
     _commit = subprocess.run(
@@ -40,17 +40,7 @@ _TOOL_REGISTRATIONS = [
     ("trace_calls", handlers.tool_trace_calls),
     ("analyze_project", handlers.tool_analyze_project),
     ("get_symbol_summaries", handlers.tool_get_symbol_summaries),
-    ("code_search", handlers.tool_code_search),
-    ("find_files", handlers.tool_find_files),
-    ("dir_summary", handlers.tool_dir_summary),
-    ("semantic_search", handlers.tool_semantic_search),
     ("get_config", handlers.tool_get_config),
-    ("get_metrics_report", handlers.tool_get_metrics_report),
-    ("get_metrics_events", handlers.tool_get_metrics_events),
-    ("get_metrics_slowest", handlers.tool_get_metrics_slowest),
-    ("get_metrics_errors", handlers.tool_get_metrics_errors),
-    ("reset_metrics", handlers.tool_reset_metrics),
-    ("get_metrics_daily_trend", handlers.tool_get_metrics_daily_trend),
     ("compact_change_intelligence", handlers.tool_compact_change_intelligence),
     ("draft_commit", handlers.tool_draft_commit),
     ("approve_commit_draft", handlers.tool_approve_commit_draft),

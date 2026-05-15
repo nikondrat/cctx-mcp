@@ -71,17 +71,8 @@ Add to your MCP client config:
 | `find_symbols` | symbol locations by name or type | `grep -r` + file reads | ~99% |
 | `get_dependencies` | all imports of a file in one shot | `grep ^import` | ~96% |
 | `trace_calls` | every call site with file + line | `grep` across repo | ~90% |
-| `get_symbol_summaries` | AI semantic descriptions per symbol | reading implementation | ~85% |
-
-### Search & Navigation
-
-| Tool | Returns | Replaces | Savings |
-|------|---------|----------|---------|
 | `analyze_project` | language breakdown, file counts, tree | `find` + `wc` | ~98% |
-| `code_search` | regex matches with context lines | `grep` + `cat` | ~90% |
-| `semantic_search` | natural language query over indexed codebase | reading everything | ~96% |
-| `dir_summary` | directory listing with sizes | `ls -la` | ~80% |
-| `find_files` | files matching name, extension, path | `find` | ~80% |
+| `get_symbol_summaries` | AI semantic descriptions per symbol | reading implementation | ~85% |
 
 ### Git & Commits
 
@@ -93,7 +84,7 @@ Add to your MCP client config:
 
 ### Observability
 
-`get_config` · `get_health` · `get_metrics_report` · `get_metrics_events` · `get_metrics_daily_trend` · `get_metrics_slowest` · `get_version`
+`get_config` · `get_health` · `get_version`
 
 ---
 
@@ -104,7 +95,6 @@ Add to your MCP client config:
 | Read 500-line file | ~1,500 tokens | ~200 tokens | **87%** |
 | Find function across project | ~5,000 tokens | ~50 tokens | **99%** |
 | Understand imports | ~800 tokens | ~30 tokens | **96%** |
-| Semantic query across codebase | ~8,000 tokens | ~300 tokens | **96%** |
 | Analyze project structure | ~10,000 tokens | ~150 tokens | **98%** |
 | Git change summary | ~3,000 tokens | ~750 tokens | **75%** |
 
@@ -190,6 +180,16 @@ uv run python -m code_context.server --skip-index
 uv sync
 uv run pytest tests/ -v
 ```
+
+### Debug Logging
+
+Tool calls are logged to `~/.code-context-cache/debug.jsonl` with args, result preview, latency, and status:
+
+```bash
+tail -f ~/.code-context-cache/debug.jsonl
+```
+
+Set `CC_DEBUG_LOG` env var to change the log path.
 
 PRs welcome. [Open issues](https://github.com/nikondrat/cctx-mcp/issues).
 
