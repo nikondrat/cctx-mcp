@@ -44,6 +44,7 @@ _TOOL_REGISTRATIONS = [
     ("compact_change_intelligence", handlers.tool_compact_change_intelligence),
     ("draft_commit", handlers.tool_draft_commit),
     ("approve_commit_draft", handlers.tool_approve_commit_draft),
+    ("list_tools", handlers.tool_list_tools),
 ]
 
 for name, fn in _TOOL_REGISTRATIONS:

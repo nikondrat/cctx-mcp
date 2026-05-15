@@ -31,6 +31,10 @@ HYGIENE_EXCLUDE_PATTERNS = (
     r"(\.env|\.credentials|\.secret)",
     # changelogs — too noisy
     r"(CHANGELOG|changelog|CHANGES)",
+    # Xcode project noise — changes on every open in different Xcode version
+    r"\.(pbxproj|storyboard|xib|xcscheme|xcconfig)$",
+    r"xcshareddata/",
+    r"xcuserdata/",
 )
 
 
@@ -39,6 +43,18 @@ def _is_noise_path(rel_path: str) -> bool:
         if re.search(p, rel_path):
             return True
     return False
+
+
+def _is_gitignored(rel_path: str, repo_path: Path) -> bool:
+    """Check if path matches .gitignore or global gitignore rules."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "check-ignore", "-q", rel_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
 
 
 # ── data contracts ──────────────────────────────────────────────────────
@@ -91,7 +107,11 @@ class CompactChangeIntel:
     ) -> CompactChange:
         files = self._get_changed_files(staged=staged, unstaged=unstaged)
         if respect_hygiene:
-            files = [f for f in files if not _is_noise_path(f.path)]
+            files = [
+                f for f in files
+                if not _is_noise_path(f.path)
+                and not _is_gitignored(f.path, self._repo)
+            ]
 
         cc = CompactChange()
         cc.files = files

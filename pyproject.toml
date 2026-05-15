@@ -1,6 +1,6 @@
 [project]
 name = "cctx-mcp"
-version = "0.5.3"
+version = "0.5.4"
 description = "MCP server for AI agents — structured code analysis that cuts token usage by 87%"
 readme = "README.md"
 requires-python = ">=3.10"

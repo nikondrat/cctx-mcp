@@ -19,16 +19,27 @@ When in doubt, check your available tool list for the prefix.
 
 ### Priority Rules
 
+Each MCP tool's **description** (visible in your tool list) states what native operation it replaces and the token savings. Read those descriptions — they guide tool selection at decision time.
+
 | Instead of this | Use this | Savings |
 |-----------------|----------|---------|
-| `Read` / `cat` entire file | `smart_read` (smart_read) | ~87% |
-| `Grep` for a symbol across project | `find_symbols` (find_symbols) | ~99% |
-| Manual import parsing | `get_dependencies` (get_dependencies) | ~96% |
-| Searching call sites by grep | `trace_calls` (trace_calls) | ~90% |
-| Exploring unfamiliar codebase | `analyze_project` (analyze_project) | ~98% |
-| Reading file just to understand symbols | `smart_read` → read only if needed | ~87% |
+| `Read` / `cat` entire file | `smart_read` | ~87% |
+| `Grep` for a symbol across project | `find_symbols` | ~99% |
+| Manual import parsing | `get_dependencies` | ~96% |
+| Searching call sites by grep | `trace_calls` | ~90% |
+| Exploring unfamiliar codebase | `analyze_project` | ~98% |
+| Reading file just to understand symbols | `smart_read` first | ~87% |
 | `git diff` + `git status` | `compact_change_intelligence` | ~75% |
 | Writing commit message from scratch | `draft_commit` | ~90% |
+| Forgetting available tools | `list_tools` | — |
+
+### Tool Selection Hierarchy (CCTX > Subagent > Native)
+
+For **research / exploration / analysis**:
+1. **CCTX tools first** — `find_symbols`, `smart_read`, `trace_calls`, `get_dependencies`, `analyze_project`
+2. **Subagents last** — only for tasks CCTX cannot do (mutating code, multi-file refactoring)
+
+Rationale: subagents have only grep/glob/read — they load full files and waste context. CCTX understands project structure and loads only what's needed. Defaulting to subagents for research is a known bad pattern.
 
 **The only exception**: read a file directly only when you need the full implementation body to make an edit. Even then, use `smart_read` first to locate the exact symbol, then read only the relevant line range.
 
@@ -106,6 +117,9 @@ Server version for staleness detection. Call after any edit to verify server pic
 ### `get_health()`
 System dependency health: Ollama, embeddings, vector index, tree-sitter.
 
+### `list_tools()`
+List all available cctx commands with descriptions. Call this when you forget what tools exist.
+
 ### `get_config()`
 Current feature flags and provider settings.
 
@@ -145,14 +159,17 @@ You MUST NOT use:
 |-----------------|----------|
 | `git diff` + `git status` | `compact_change_intelligence` |
 | Writing commit message | `draft_commit` |
-| `git add` + `git commit` | `approve_commit_draft` |
+| `git commit` | `approve_commit_draft` |
 
 Flow:
-1. `compact_change_intelligence(project_path)` to see what changed
-2. `draft_commit(project_path)` to generate a commit message
-3. `approve_commit_draft(project_path)` or `approve_commit_draft(project_path, message='...')` to commit
+1. `git add <files>` — stage what you want to commit
+2. `compact_change_intelligence(project_path)` to see what changed
+3. `draft_commit(project_path)` to generate a commit message (only looks at staged)
+4. `approve_commit_draft(project_path)` or `approve_commit_draft(project_path, message='...')` to commit
 
 **NEVER fall back to bash `git commit`**. If the tools fail, report the error — don't use native git commands.
+
+> Important: `draft_commit` now analyzes only **staged** changes (like `git commit`). Stage your changes with `git add` first. The old auto-staging behavior (`git add -A` before commit) has been removed — you control what goes in.
 
 ---
 

@@ -79,27 +79,53 @@ def get_commit_gate() -> CommitGate:
 
 
 def tool_smart_read(file_path: str, project_path: Optional[str] = None) -> str:
-    path = Path(file_path)
-    if not path.exists():
-        return f"Error: File not found: {file_path}"
+    """Structured file analysis: symbol hierarchy, dependencies, line ranges, doc comments.
 
-    if path.exists():
-        baseline = max(100, path.stat().st_size // 4)
-        set_tool_baseline(baseline=baseline, baseline_op="read_file")
+    Use INSTEAD of Read/cat when exploring a file you haven't seen before.
+    ~87% token savings vs reading entire file.
 
-    if project_path:
-        search = get_search(project_path)
-    else:
-        search = ProjectSearch(path.parent, get_cache())
+    Only fall back to Read when you need the full implementation body to make an edit.
+    Even then, call smart_read first to find exact line ranges.
 
-    result = search.smart_read(path)
-    if result is None:
-        return f"Error: Could not analyze file: {file_path}"
+    Args:
+        file_path: Path to the file to analyze
+        project_path: Optional project root for richer context (import resolution, etc.)
+    """
+    try:
+        path = Path(file_path)
+        if not path.exists():
+            return f"Error: File not found: {file_path}"
 
-    return result
+        if path.exists():
+            baseline = max(100, path.stat().st_size // 4)
+            set_tool_baseline(baseline=baseline, baseline_op="read_file")
+
+        if project_path:
+            search = get_search(project_path)
+        else:
+            search = ProjectSearch(path.parent, get_cache())
+
+        result = search.smart_read(path)
+        if result is None:
+            ext = path.suffix.lower()
+            return f"Error: Could not analyze {ext} files — missing or unsupported analyzer for '{file_path}'"
+
+        return result
+    except Exception as e:
+        return f"Error: smart_read failed for '{file_path}': {e}"
 
 
 def tool_find_symbols(project_path: str, name: Optional[str] = None, symbol_type: Optional[str] = None) -> str:
+    """Exact symbol search by name or type across the project.
+
+    Use INSTEAD of grep to find function/class/method/interface/struct/enum definitions.
+    ~99% token savings vs grep + read to find what you need.
+
+    Args:
+        project_path: Root directory of the project
+        name: Optional symbol name to search for (partial match)
+        symbol_type: Optional filter: function, class, method, interface, struct, enum, protocol
+    """
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
@@ -123,6 +149,15 @@ def tool_find_symbols(project_path: str, name: Optional[str] = None, symbol_type
 
 
 def tool_get_dependencies(file_path: str, project_path: Optional[str] = None) -> str:
+    """All imports/dependencies of a file without reading its contents.
+
+    Use INSTEAD of Read + manual import parsing to understand a file's dependencies.
+    ~96% token savings vs reading the file and extracting imports manually.
+
+    Args:
+        file_path: Path to the source file
+        project_path: Optional project root for import resolution
+    """
     path = Path(file_path)
     if not path.exists():
         return f"Error: File not found: {file_path}"
@@ -145,6 +180,17 @@ def tool_get_dependencies(file_path: str, project_path: Optional[str] = None) ->
 
 
 def tool_trace_calls(symbol_name: str, project_path: str) -> str:
+    """Every call site of a symbol across the project. Impact analysis.
+
+    Use INSTEAD of grep to find all usages before refactoring a function/class.
+    ~90% token savings vs grep + manual context reading.
+
+    Call BEFORE changing any shared symbol to understand impact radius.
+
+    Args:
+        symbol_name: Fully qualified or bare symbol name to trace
+        project_path: Root directory of the project
+    """
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
@@ -165,6 +211,17 @@ def tool_trace_calls(symbol_name: str, project_path: str) -> str:
 
 
 def tool_analyze_project(project_path: str, max_depth: int = 2) -> str:
+    """Project-wide structure: file counts, languages, directory tree.
+
+    Use INSTEAD of find/ls + manual counting to understand project layout.
+    ~98% token savings vs walking the tree manually.
+
+    Call when first entering a new project to get oriented.
+
+    Args:
+        project_path: Root directory of the project
+        max_depth: Maximum directory tree depth to scan (default 2)
+    """
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
@@ -203,6 +260,17 @@ def tool_analyze_project(project_path: str, max_depth: int = 2) -> str:
 
 
 def tool_get_symbol_summaries(file_path: str, project_path: Optional[str] = None) -> str:
+    """Semantic AI summaries per symbol: purpose, behavior, confidence, provenance.
+
+    Use when you need to understand what a symbol DOES, not just where it is.
+    ~90% token savings vs reading the entire implementation to infer purpose.
+
+    Requires: LLM provider configured (Ollama or OpenRouter).
+
+    Args:
+        file_path: Path to the source file
+        project_path: Optional project root for context
+    """
     path = Path(file_path)
     if not path.exists():
         return f"Error: File not found: {file_path}"
@@ -326,6 +394,12 @@ def tool_semantic_search(query: str, project_path: str, top_k: int = 5) -> str:
 
 
 def tool_get_config() -> str:
+    """Current feature flags and provider settings for code-context.
+
+    Use to check which LLM providers, embedding models, and features are enabled.
+    Call before using features that depend on LLM (summaries, commits, embeddings).
+    Not a replacement for a native operation — configuration introspection.
+    """
     cfg = _get_config()
     lines = ["Current configuration:"]
     for k, v in cfg.as_dict().items():
@@ -340,6 +414,12 @@ def tool_get_config() -> str:
     return "\n".join(lines)
 
 def tool_get_health() -> str:
+    """System dependency health: Ollama, embeddings, vector index, tree-sitter.
+
+    Use to diagnose why a code-context feature isn't working.
+    Call when semantic_search or LLM-dependent tools return errors.
+    Not a replacement for a native operation — diagnostics.
+    """
     cfg = _get_config()
     report: dict[str, Any] = {}
 
@@ -460,6 +540,19 @@ def tool_get_metrics_daily_trend(days: int = 7) -> str:
 
 
 def tool_compact_change_intelligence(project_path: str, staged: bool = False, unstaged: bool = True, respect_hygiene: bool = True) -> str:
+    """Structured diff + intent cues. Replaces git diff + git status.
+
+    Use INSTEAD of git diff/git status to understand working changes before committing.
+    ~75% token savings vs raw diff output.
+
+    Call BEFORE draft_commit to review what will be committed.
+
+    Args:
+        project_path: Git repository root
+        staged: Include staged changes (default False)
+        unstaged: Include unstaged changes (default True)
+        respect_hygiene: Skip generated files, lockfiles, etc. (default True)
+    """
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
@@ -476,15 +569,26 @@ def tool_compact_change_intelligence(project_path: str, staged: bool = False, un
 
 
 def tool_draft_commit(project_path: str) -> str:
+    """AI-generated conventional commit message from working changes.
+
+    Use INSTEAD of writing commit messages from scratch.
+    ~90% token savings vs manual message drafting.
+
+    Always call compact_change_intelligence first, then review the draft
+    before calling approve_commit_draft.
+
+    Args:
+        project_path: Git repository root
+    """
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
 
     intel = CompactChangeIntel(path)
-    cc = intel.summarize_working_changes()
+    cc = intel.summarize_working_changes(staged=True, unstaged=False)
 
     if cc.change_count == 0:
-        return "No changes to commit."
+        return "No staged changes to commit."
 
     cfg = _get_config()
     generator = CommitGenerator(
@@ -505,6 +609,17 @@ def tool_draft_commit(project_path: str) -> str:
 
 
 def tool_approve_commit_draft(project_path: str, message: Optional[str] = None) -> str:
+    """Execute git commit after reviewing draft.
+
+    Use INSTEAD of git add + git commit. Enforces the draft-review cycle.
+    Combined with draft_commit, replaces the entire manual commit flow.
+
+    Pass a custom message to override the draft. Omit to use the generated draft.
+
+    Args:
+        project_path: Git repository root
+        message: Optional custom commit message (uses draft if omitted)
+    """
     path = Path(project_path)
     if not path.exists():
         return f"Error: Project not found: {project_path}"
@@ -515,6 +630,33 @@ def tool_approve_commit_draft(project_path: str, message: Optional[str] = None) 
 
     gate.approve(message)
     return _execute_commit(path)
+
+
+def tool_list_tools() -> str:
+    """List all available cctx MCP tools with descriptions."""
+    return """cctx MCP tools:
+
+  File Analysis
+    smart_read          — Structured file analysis (symbols, deps, doc comments)
+    get_dependencies    — All imports/dependencies of a file
+    get_symbol_summaries — AI semantic summaries per symbol
+
+  Search & Navigation
+    find_symbols        — Find symbols by name or type across project
+    trace_calls         — Every call site of a symbol (impact analysis)
+    analyze_project     — Project structure: files, languages, directory tree
+
+  Git & Commits
+    compact_change_intelligence — Structured diff + status (replaces git diff)
+    draft_commit        — AI commit message from working changes
+    approve_commit_draft — Execute the approved commit
+
+  System
+    get_config          — Feature flags and provider settings
+    get_health          — Dependency health (Ollama, tree-sitter, etc.)
+    get_version         — Server version and build info
+    list_tools          — This list
+"""
 
 
 def _execute_commit(repo_path: Path) -> str:
@@ -528,12 +670,6 @@ def _execute_commit(repo_path: Path) -> str:
     try:
         with open(repo_path / ".git/COMMIT_EDITMSG", "w") as f:
             f.write(msg)
-        add = subprocess.run(
-            ["git", "add", "-A"],
-            capture_output=True, text=True, cwd=repo_path, timeout=30,
-        )
-        if add.returncode != 0:
-            return f"git add failed:\n{add.stderr or add.stdout}"
         result = subprocess.run(
             ["git", "commit", "--file", ".git/COMMIT_EDITMSG"],
             capture_output=True, text=True, cwd=repo_path, timeout=30,
