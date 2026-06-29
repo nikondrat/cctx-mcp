@@ -6,9 +6,15 @@
 </p>
 
 <p align="center">
-  <strong>Cut AI agent token usage by 87%.</strong><br>
-  Structure-aware code analysis via the <a href="https://modelcontextprotocol.io">Model Context Protocol</a> —
-  returns symbol trees, dependencies, and docs instead of raw file contents.
+  <strong>Структура, а не простыня.</strong><br>
+  MCP-сервер, который даёт AI-агенту скелет кода —
+  чтобы он тратил контекст на работу, а не на ориентирование.
+</p>
+
+<p align="center">
+  Работает с <strong>opencode</strong> · <strong>Claude Desktop</strong> · <strong>Cursor</strong> · любым MCP-клиентом
+  <br><br>
+  <a href="https://github.com/nikondrat/cctx-mcp"><img src="https://img.shields.io/github/stars/nikondrat/cctx-mcp?style=social" alt="Stars"></a>
 </p>
 
 <p align="center">
@@ -22,31 +28,92 @@
 
 ---
 
-## Overview
+## Зачем это
 
-**CCTX-MCP** — Code ConTeXt via Model Context Protocol. An MCP server that gives AI agents a structured view of source code without reading entire files.
+Я 10 месяцев работаю исключительно через AI-агентов. Собрал несколько агентных систем с нуля. Прошёл путь Cursor → opencode и урезал месячный расход с $200 до $10 — без потери качества в своих задачах.
 
-Built for **Claude**, **Cursor**, **OpenCode**, and any MCP-compatible AI coding tool.
+За эти 10 месяцев я видел прозрачно: что агент вызывает, что видит, где тратит контекст впустую, чего ему не хватает.
 
-<p align="center">
-  <code>uvx cctx-mcp</code>
-  &nbsp;·&nbsp;
-  <a href="#%EF%B8%8F-tools">Tools</a>
-  &nbsp;·&nbsp;
-  <a href="#-token-savings">Savings</a>
-  &nbsp;·&nbsp;
-  <a href="#-install">Install</a>
-</p>
+Картина повторялась:
+
+1. Агент заходит в новый файл → `Read` 500 строк кода
+2. Нужно найти функцию → `grep` по всему проекту
+3. Нужно понять импорты → читает тот же файл снова
+4. Коммит → парсит `git diff` на 3000 токенов
+
+Проблема не в стоимости токенов — токены дёшевы. Проблема в **налоге на ориентирование**: агент сжигает контекстное окно на попытки понять, где он находится, вместо того чтобы делать реальную работу.
+
+**code-context — не продукт. Это запись того, чего мне не хватало как пользователю AI-агентов.** Каждый инструмент здесь появился потому, что я смотрел, как агент тупит, и думал: «это должно делаться в один вызов».
 
 ---
 
-## Quick Start
+## Что он реально делает
+
+### Структура вместо простыни
+
+Незнакомый файл? Не читай — просканируй.
+
+`smart_read` возвращает скелет: иерархия символов, зависимости, диапазоны строк, doc-комментарии. Агент видит `class Foo на строке 42, method bar() на строке 85, импортов: 3` — а не 500 строк кода, которые ему надо ментально распарсить.
+
+То же самое: `get_symbol_body` когда нужна одна функция, `find_symbols` когда нужно одно определение по всему проекту, `get_dependencies` когда нужны импорты без чтения файла.
+
+### Diff без простыни
+
+`compact_change_intelligence` заменяет `git diff` + `git status`: «4 файла изменено, добавлена login(), переименован AuthProvider.validate()». Агент видит картину целиком в 10 строках вместо 200.
+
+В паре с `draft_commit` — AI генерирует conventional commit message из структурированных изменений. Без парсинга сырого diff.
+
+### Аннотации функций (в разработке)
+
+`get_symbol_summaries` уже генерирует однострочные AI-описания для каждой функции: `bar() — валидирует ввод, возвращает токен сессии`.
+
+Идея — встроить эти аннотации прямо в вывод `smart_read`, чтобы модель видела `bar()  // валидирует ввод` при сканировании файла и не тратила токены на догадки о том, что делает функция. Сейчас это отдельный вызов — работаю над объединением.
+
+---
+
+### Когда это НЕ нужно
+
+code-context даёт структуру. Он не поможет с:
+
+- **Редактированием кода.** Он read-only. Инструменты записи (`edit`, `write`) остаются нативными.
+- **Запуском тестов и сборкой.** Нет раннера тестов, нет компилятора.
+- **Деплоем.** Нет CI/CD интеграции.
+- **Работой с сырым содержимым файла.** Если нужен полный текст файла — `Read` всё ещё правильный инструмент.
+
+Используй для **ориентирования, поиска, анализа и коммитов**. Всё остальное — вне его зоны.
+
+---
+
+## Инструменты
+
+| Инструмент | Заменяет | Статус |
+|------------|----------|--------|
+| `smart_read` | `Read` + ручной разбор | ✅ |
+| `find_symbols` | `grep` + чтение файлов | ✅ |
+| `get_dependencies` | `Read` + извлечение импортов | ✅ |
+| `trace_calls` | `grep` по всему репозиторию | ✅ |
+| `analyze_project` | `find` + `ls` + `wc` | ✅ |
+| `get_symbol_body` | `Read` целого файла | ✅ |
+| `get_symbol_summaries` | Чтение реализации | ✅ нужна LLM |
+| `compact_change_intelligence` | `git diff` + `git status` | ✅ |
+| `draft_commit` | Написание commit message | ✅ нужна LLM |
+| `approve_commit_draft` | `git commit` | ✅ |
+| `stage_changes` / `unstage_changes` | `git add` / `git restore --staged` | ✅ |
+| `get_config` · `get_health` · `get_version` | — | ✅ |
+| **Аннотации в smart_read** | — | **В планах** |
+| `semantic_search` · `code_search` · `find_files` | grep + read | Реализовано, не зарегистрировано |
+
+Я выкатываю только то, чем реально пользуюсь. Незарегистрированные инструменты есть в коде, но не торчат наружу, пока я не убежусь, что они заслуживают своё место.
+
+---
+
+## Быстрый старт
 
 ```bash
 uvx cctx-mcp
 ```
 
-Add to your MCP client config:
+Добавь в конфиг MCP-клиента:
 
 ```json
 {
@@ -59,50 +126,11 @@ Add to your MCP client config:
 }
 ```
 
----
-
-## Tools
-
-### Code Analysis
-
-| Tool | Returns | Replaces | Savings |
-|------|---------|----------|---------|
-| `smart_read` | symbol hierarchy, deps, docs, line counts | `cat` + manual parsing | ~87% |
-| `find_symbols` | symbol locations by name or type | `grep -r` + file reads | ~99% |
-| `get_dependencies` | all imports of a file in one shot | `grep ^import` | ~96% |
-| `trace_calls` | every call site with file + line | `grep` across repo | ~90% |
-| `analyze_project` | language breakdown, file counts, tree | `find` + `wc` | ~98% |
-| `get_symbol_summaries` | AI semantic descriptions per symbol | reading implementation | ~85% |
-
-### Git & Commits
-
-| Tool | Returns | Replaces | Savings |
-|------|---------|----------|---------|
-| `compact_change_intelligence` | structured git diff with intent cues | `git diff` + `git status` | ~75% |
-| `draft_commit` | AI-generated conventional commit message | writing from scratch | ~90% |
-| `approve_commit_draft` | executes the commit after review | `git add` + `git commit` | — |
-
-### Observability
-
-`get_config` · `get_health` · `get_version`
+Не нужны API-ключи и внешние сервисы для базового функционала. Требуется Python 3.10+. LLM нужна для commit drafting и семантических суммари — использует Ollama (локально) или OpenRouter (облако).
 
 ---
 
-## Token Savings
-
-| Operation | Native | With CCTX-MCP | Savings |
-|-----------|-------:|--------------:|--------:|
-| Read 500-line file | ~1,500 tokens | ~200 tokens | **87%** |
-| Find function across project | ~5,000 tokens | ~50 tokens | **99%** |
-| Understand imports | ~800 tokens | ~30 tokens | **96%** |
-| Analyze project structure | ~10,000 tokens | ~150 tokens | **98%** |
-| Git change summary | ~3,000 tokens | ~750 tokens | **75%** |
-
-Typical session: **80%+ aggregate savings**.
-
----
-
-## Supported Languages
+## Поддерживаемые языки
 
 <p>
   <img src="https://img.shields.io/badge/Swift-FA7343?style=flat-square&logo=swift&logoColor=white" alt="Swift">
@@ -114,13 +142,13 @@ Typical session: **80%+ aggregate savings**.
   <img src="https://img.shields.io/badge/Dart-0175C2?style=flat-square&logo=dart&logoColor=white" alt="Dart">
 </p>
 
-Powered by [tree-sitter](https://tree-sitter.github.io/) AST — each language has a dedicated parser.
+Работает на [tree-sitter](https://tree-sitter.github.io/) AST — для каждого языка отдельный парсер.
 
 ---
 
-## Install
+## Установка
 
-### uvx (recommended)
+### uvx (рекомендуется)
 
 ```json
 {
@@ -150,7 +178,7 @@ pip install cctx-mcp
 }
 ```
 
-### source
+### из исходников
 
 ```bash
 git clone https://github.com/nikondrat/cctx-mcp.git
@@ -161,40 +189,64 @@ uv run python -m code_context.server --skip-index
 
 ---
 
-## Configuration
+## Конфигурация
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CC_OLLAMA_URL` | `http://localhost:11434` | Ollama server address |
-| `CC_OPENROUTER_API_KEY` | — | Remote inference key |
+| Переменная | По умолчанию | Описание |
+|------------|-------------|----------|
+| `CC_OLLAMA_URL` | `http://localhost:11434` | Адрес Ollama |
+| `CC_OLLAMA_TIMEOUT` | `10` | Таймаут запросов к Ollama (сек) |
+| `CC_COMMIT_MODEL` | `gemma4:latest` | Локальная модель для commit drafting |
+| `CC_EMBED_MODEL` | `nomic-embed-text` | Локальная модель для эмбеддингов |
+| `CC_SEMANTIC_SUMMARIES` | `1` | Включить AI-суммари символов |
+| `CC_COMMIT_DRAFTING` | `1` | Включить AI-генерацию коммитов |
 | `CC_LLM_ROUTER` | `local-first` | `local-first`, `local-only`, `remote-first`, `remote-only` |
-| `CC_COMMIT_MODEL` | `gemma4:latest` | Local model for commit drafting |
-| `CC_EMBED_MODEL` | `nomic-embed-text` | Local model for embeddings |
-| `CC_SEMANTIC_SUMMARIES` | `1` | Enable AI symbol summaries |
+| `CC_LOCAL_PROVIDER` | `ollama` | Имя локального LLM-провайдера |
+| `CC_REMOTE_PROVIDER` | `openrouter` | Имя облачного LLM-провайдера |
+| `CC_OPENROUTER_API_KEY` | — | Ключ API для облачного режима |
+| `CC_OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter-совместимый эндпоинт |
+| `CC_OPENROUTER_TIMEOUT` | `15` | Таймаут запросов к OpenRouter (сек) |
+| `CC_OPENROUTER_MAX_TOKENS` | `256` | Максимум токенов в ответе LLM |
+| `CC_OPENROUTER_TEMPERATURE` | `0.1` | Температура LLM |
+| `CC_OPENROUTER_EMBED_MODEL` | `text-embedding-3-small` | Облачная модель для эмбеддингов |
+| `CC_OPENROUTER_COMMIT_MODEL` | `openai/gpt-4o-mini` | Облачная модель для коммитов |
 
 ---
 
-## Development
+## Автор
+
+**Никита (@nikondrat)**
+
+10 месяцев ежедневно работаю с AI-агентами. Строил мультикомпонентные агентные системы, анализировал что работает (а что нет), мигрировал с проприетарных инструментов на open-source стек, ужал инфраструктурные расходы в 20 раз.
+
+code-context — дистиллят этого опыта.
+
+Занимаюсь консалтингом по архитектуре AI-агентов, разработке MCP-серверов и оптимизации LLM-воркфлоу. Если ваша команда строит AI-инструменты для разработчиков или встраивает агентов в свой стек — я могу помочь.
+
+Открыт к предложениям.
+
+---
+
+## Разработка
 
 ```bash
 uv sync
 uv run pytest tests/ -v
 ```
 
-### Debug Logging
+### Логирование
 
-Tool calls are logged to `~/.code-context-cache/debug.jsonl` with args, result preview, latency, and status:
+Вызовы инструментов пишутся в `~/.code-context-cache/debug.jsonl` с аргументами, результатом, задержкой и статусом:
 
 ```bash
 tail -f ~/.code-context-cache/debug.jsonl
 ```
 
-Set `CC_DEBUG_LOG` env var to change the log path.
+Переменная `CC_DEBUG_LOG` меняет путь к лог-файлу.
 
-PRs welcome. [Open issues](https://github.com/nikondrat/cctx-mcp/issues).
+PRs приветствуются. [Открытые issues](https://github.com/nikondrat/cctx-mcp/issues).
 
 ---
 
-## License
+## Лицензия
 
-MIT — free for any use.
+MIT — можно всё.
