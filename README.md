@@ -214,7 +214,7 @@ uv run python -m code_context.server --skip-index
 
 ## Автор
 
-**Никита (@nikondrat)**
+**Никита (@nikondrat)** · [t.me/nikondrat](https://t.me/nikondrat) · nikondrator@icloud.com
 
 10 месяцев ежедневно работаю с AI-агентами. Строил мультикомпонентные агентные системы, анализировал что работает (а что нет), мигрировал с проприетарных инструментов на open-source стек, ужал инфраструктурные расходы в 20 раз.
 
