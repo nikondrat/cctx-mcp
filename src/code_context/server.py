@@ -40,10 +40,13 @@ _TOOL_REGISTRATIONS = [
     ("trace_calls", handlers.tool_trace_calls),
     ("analyze_project", handlers.tool_analyze_project),
     ("get_symbol_summaries", handlers.tool_get_symbol_summaries),
+    ("get_symbol_body", handlers.tool_get_symbol_body),
     ("get_config", handlers.tool_get_config),
     ("compact_change_intelligence", handlers.tool_compact_change_intelligence),
     ("draft_commit", handlers.tool_draft_commit),
     ("approve_commit_draft", handlers.tool_approve_commit_draft),
+    ("stage_changes", handlers.tool_stage_changes),
+    ("unstage_changes", handlers.tool_unstage_changes),
     ("list_tools", handlers.tool_list_tools),
 ]
 
